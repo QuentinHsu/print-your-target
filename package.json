@@ -37,7 +37,8 @@
 		"watch": "tsc -watch -p ./",
 		"pretest": "pnpm run compile && pnpm run lint",
 		"lint": "eslint src",
-		"test": "vscode-test"
+		"test": "vscode-test",
+		"build:package": "pnpm vsce package --no-dependencies"
 	},
 	"devDependencies": {
 		"@types/vscode": "^1.99.0",
