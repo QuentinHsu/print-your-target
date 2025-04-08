@@ -3,11 +3,18 @@
 	"displayName": "print-your-target",
 	"description": "Print your target, such as variables, in JavaScript/TypeScript/Go files.",
 	"version": "0.0.0",
+	"author": "QuentinHsu <https://github.com/QuentinHsu>",
+	"publisher": "QuentinHsu",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/QuentinHsu/print-your-target"
+	},
 	"engines": {
 		"vscode": "^1.98.0"
 	},
 	"categories": [
-		"Other"
+		"Other",
+		"Debuggers"
 	],
 	"activationEvents": [
 		"onLanguage:javascript",
