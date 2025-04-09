@@ -20,22 +20,30 @@ export function activate(context: vscode.ExtensionContext) {
 		const config = vscode.workspace.getConfiguration('printYourTarget');
 		const errorKeywords: string[] = config.get('errorKeywords', ['error', 'err', 'e']);
 
-		switch (languageId) {
-			case 'javascript':
-			case 'typescript':
-			case 'typescriptreact':
-			case 'javascriptreact':
-			case 'vue':
-			case 'astro':
-			case 'svelte':
-			case 'html':
+		// 定义文件类型大类
+		const languageCategoryMap: { [key: string]: string } = {
+			javascript: 'javascript-family',
+			typescript: 'javascript-family',
+			typescriptreact: 'javascript-family',
+			javascriptreact: 'javascript-family',
+			vue: 'javascript-family',
+			astro: 'javascript-family',
+			svelte: 'javascript-family',
+			html: 'javascript-family',
+			go: 'go-family',
+		};
+
+		const languageCategory = languageCategoryMap[languageId] || 'unsupported';
+
+		switch (languageCategory) {
+			case 'javascript-family':
 				if (errorKeywords.includes(selectedText)) {
 					logStatement = `${indentation}console.error('${selectedText}', ${selectedText});\n`;
 				} else {
 					logStatement = `${indentation}console.log('${selectedText}', ${selectedText});\n`;
 				}
 				break;
-			case 'go':
+			case 'go-family':
 				logStatement = `${indentation}log.Printf("%v: %+v\\n", "${selectedText}", ${selectedText})\n`;
 				break;
 			default:
@@ -49,7 +57,7 @@ export function activate(context: vscode.ExtensionContext) {
 			editBuilder.insert(newPosition, logStatement);
 
 			// 如果是 Go 文件，检查是否需要导入 log 包
-			if (languageId === 'go') {
+			if (languageCategory === 'go-family') {
 				const documentText = document.getText();
 				if (!documentText.includes('import "log"')) {
 					const importStatement = 'import "log"\n\n';
