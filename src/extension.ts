@@ -18,32 +18,41 @@ export function activate(context: vscode.ExtensionContext) {
 
 		// 从插件配置中获取关键字数组
 		const config = vscode.workspace.getConfiguration('printYourTarget');
-		const errorKeywords: string[] = config.get('errorKeywords', ['error', 'err', 'e']);
+		const errorKeywordsJavaScript: string[] = config.get('errorKeywords.javascript', ['error', 'err', 'e']);
+		const errorKeywordsGo: string[] = config.get('errorKeywords.go', ['err', 'error']);
 
 		// 定义文件类型大类
 		const languageCategoryMap: { [key: string]: string } = {
-			javascript: 'javascript-family',
-			typescript: 'javascript-family',
-			typescriptreact: 'javascript-family',
-			javascriptreact: 'javascript-family',
-			vue: 'javascript-family',
-			astro: 'javascript-family',
-			svelte: 'javascript-family',
-			html: 'javascript-family',
-			go: 'go-family',
+			javascript: 'javascript',
+			typescript: 'javascript',
+			typescriptreact: 'javascript',
+			javascriptreact: 'javascript',
+			vue: 'javascript',
+			astro: 'javascript',
+			svelte: 'javascript',
+			html: 'javascript',
+			go: 'go',
 		};
 
 		const languageCategory = languageCategoryMap[languageId] || 'unsupported';
 
+		// 获取当前语言大类的错误关键字
+		let errorKeywords: string[] = [];
+		if (languageCategory === 'javascript') {
+			errorKeywords = errorKeywordsJavaScript;
+		} else if (languageCategory === 'go') {
+			errorKeywords = errorKeywordsGo;
+		}
+
 		switch (languageCategory) {
-			case 'javascript-family':
+			case 'javascript':
 				if (errorKeywords.includes(selectedText)) {
 					logStatement = `${indentation}console.error('${selectedText}', ${selectedText});\n`;
 				} else {
 					logStatement = `${indentation}console.log('${selectedText}', ${selectedText});\n`;
 				}
 				break;
-			case 'go-family':
+			case 'go':
 				logStatement = `${indentation}log.Printf("%v: %+v\\n", "${selectedText}", ${selectedText})\n`;
 				break;
 			default:
@@ -57,7 +66,7 @@ export function activate(context: vscode.ExtensionContext) {
 			editBuilder.insert(newPosition, logStatement);
 
 			// 如果是 Go 文件，检查是否需要导入 log 包
-			if (languageCategory === 'go-family') {
+			if (languageCategory === 'go') {
 				const documentText = document.getText();
 				if (!documentText.includes('import "log"')) {
 					const importStatement = 'import "log"\n\n';

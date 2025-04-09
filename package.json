@@ -41,7 +41,7 @@
 		"configuration": {
 			"type": "object",
 			"properties": {
-				"printYourTarget.errorKeywords": {
+				"printYourTarget.errorKeywords.javascript": {
 					"type": "array",
 					"items": {
 						"type": "string"
@@ -51,7 +51,18 @@
 						"err",
 						"e"
 					],
-					"description": "Keywords that should trigger console.error instead of console.log."
+					"description": "Define error keywords for JavaScript family languages."
+				},
+				"printYourTarget.errorKeywords.go": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"default": [
+						"err",
+						"error"
+					],
+					"description": "Define error keywords for Go language."
 				}
 			}
 		}
