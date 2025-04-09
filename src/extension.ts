@@ -82,6 +82,63 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 
 	context.subscriptions.push(disposable);
+
+	let deleteLogDisposable = vscode.commands.registerCommand('print-your-target.deleteLogStatements', () => {
+		const editor = vscode.window.activeTextEditor;
+
+		if (!editor) {
+			return;
+		}
+
+		const document = editor.document;
+		const languageId = document.languageId;
+
+		// 从插件配置中获取日志类型
+		const config = vscode.workspace.getConfiguration('printYourTarget');
+		const deleteLogTypesJavaScript: string[] = config.get('deleteLogType.javascript', ['log']);
+		const deleteLogTypesGo: string[] = config.get('deleteLogType.go', ['Printf']);
+
+		// 根据语言类型构建正则表达式
+		let logRegex: RegExp | null = null;
+
+		if (languageId === 'javascript' || languageId === 'typescript') {
+			logRegex = new RegExp(
+				`\\bconsole\\.(${deleteLogTypesJavaScript.join('|')})\\(.*?\\);?`,
+				'g'
+			);
+		} else if (languageId === 'go') {
+			logRegex = new RegExp(
+				`\\blog\\.(${deleteLogTypesGo.join('|')})\\(.*?\\);?`,
+				'g'
+			);
+		}
+
+		if (!logRegex) {
+			vscode.window.showInformationMessage('Unsupported file type.');
+			return;
+		}
+
+		const documentText = document.getText();
+		const edits: vscode.TextEdit[] = [];
+		let match: RegExpExecArray | null;
+
+		// 查找所有匹配的日志语句
+		while ((match = logRegex.exec(documentText)) !== null) {
+			const start = document.positionAt(match.index);
+			const end = document.positionAt(match.index + match[0].length);
+			edits.push(vscode.TextEdit.delete(new vscode.Range(start, end)));
+		}
+
+		// 应用编辑
+		const edit = new vscode.WorkspaceEdit();
+		edit.set(document.uri, edits);
+
+		vscode.workspace.applyEdit(edit).then(() => {
+			vscode.window.showInformationMessage('Specified log statements deleted.');
+		});
+	});
+
+	context.subscriptions.push(deleteLogDisposable);
 }
 
 export function deactivate() { }

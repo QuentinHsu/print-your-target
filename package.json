@@ -28,6 +28,10 @@
 			{
 				"command": "print-your-target.addLogStatement",
 				"title": "Add Log Statement"
+			},
+			{
+				"command": "print-your-target.deleteLogStatements",
+				"title": "Delete Log Statements"
 			}
 		],
 		"keybindings": [
@@ -35,6 +39,12 @@
 				"command": "print-your-target.addLogStatement",
 				"key": "ctrl+shift+l",
 				"mac": "cmd+shift+l",
+				"when": "editorTextFocus"
+			},
+			{
+				"command": "print-your-target.deleteLogStatements",
+				"key": "ctrl+shift+d",
+				"mac": "cmd+shift+d",
 				"when": "editorTextFocus"
 			}
 		],
@@ -63,6 +73,26 @@
 						"error"
 					],
 					"description": "Define error keywords for Go language."
+				},
+				"printYourTarget.deleteLogType.javascript": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"default": [
+						"log"
+					],
+					"description": "Define log types for JavaScript family languages."
+				},
+				"printYourTarget.deleteLogType.go": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"default": [
+						"Printf"
+					],
+					"description": "Define log types for Go language."
 				}
 			}
 		}
