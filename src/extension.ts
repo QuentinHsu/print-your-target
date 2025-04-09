@@ -19,6 +19,12 @@ export function activate(context: vscode.ExtensionContext) {
 		switch (languageId) {
 			case 'javascript':
 			case 'typescript':
+			case 'typescriptreact':
+			case 'javascriptreact':
+			case 'vue':
+			case 'astro':
+			case 'svelte':
+			case 'html':
 				logStatement = `${indentation}console.log({${selectedText}});\n`;
 				break;
 			case 'go':
