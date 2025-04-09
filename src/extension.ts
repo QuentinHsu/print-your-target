@@ -16,6 +16,10 @@ export function activate(context: vscode.ExtensionContext) {
 		const indentation = currentLine.text.match(/^\s*/)?.[0] || '';
 		let logStatement = '';
 
+		// 从插件配置中获取关键字数组
+		const config = vscode.workspace.getConfiguration('printYourTarget');
+		const errorKeywords: string[] = config.get('errorKeywords', ['error', 'err', 'e']);
+
 		switch (languageId) {
 			case 'javascript':
 			case 'typescript':
@@ -25,7 +29,7 @@ export function activate(context: vscode.ExtensionContext) {
 			case 'astro':
 			case 'svelte':
 			case 'html':
-				if (['error', 'err', 'e'].includes(selectedText)) {
+				if (errorKeywords.includes(selectedText)) {
 					logStatement = `${indentation}console.error('${selectedText}', ${selectedText});\n`;
 				} else {
 					logStatement = `${indentation}console.log('${selectedText}', ${selectedText});\n`;

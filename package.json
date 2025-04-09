@@ -37,7 +37,24 @@
 				"mac": "cmd+shift+l",
 				"when": "editorTextFocus"
 			}
-		]
+		],
+		"configuration": {
+			"type": "object",
+			"properties": {
+				"printYourTarget.errorKeywords": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"default": [
+						"error",
+						"err",
+						"e"
+					],
+					"description": "Keywords that should trigger console.error instead of console.log."
+				}
+			}
+		}
 	},
 	"scripts": {
 		"vscode:prepublish": "pnpm run compile",
