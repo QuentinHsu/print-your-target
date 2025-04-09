@@ -25,7 +25,11 @@ export function activate(context: vscode.ExtensionContext) {
 			case 'astro':
 			case 'svelte':
 			case 'html':
-				logStatement = `${indentation}console.log('${selectedText}', ${selectedText});\n`;
+				if (['error', 'err', 'e'].includes(selectedText)) {
+					logStatement = `${indentation}console.error('${selectedText}', ${selectedText});\n`;
+				} else {
+					logStatement = `${indentation}console.log('${selectedText}', ${selectedText});\n`;
+				}
 				break;
 			case 'go':
 				logStatement = `${indentation}log.Printf("%v: %+v\\n", "${selectedText}", ${selectedText})\n`;
