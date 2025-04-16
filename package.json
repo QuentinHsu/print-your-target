@@ -2,7 +2,7 @@
 	"name": "print-your-target",
 	"displayName": "Print your target",
 	"description": "Print your target, such as variables, in JavaScript/TypeScript/Go files.",
-	"version": "0.0.1",
+	"version": "0.0.2",
 	"author": "QuentinHsu <https://github.com/QuentinHsu>",
 	"publisher": "QuentinHsu",
 	"repository": {
