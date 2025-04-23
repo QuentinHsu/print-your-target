@@ -47,19 +47,20 @@ jobs:
           configurationJson: |
             {
               "template": "#{{CHANGELOG}}",
+              "commit_template": "- #{{BODY}} - #{{AUTHOR}}",
               "categories": [
                 {
                   "title": "### Feature",
-                  "labels": ["feat", "feature"]
+                  "labels": ["feat", "feature"],
                 },
                 {
                   "title": "### Fix",
-                  "labels": ["fix", "bug"]
+                  "labels": ["fix", "bug"],
                 },
                 {
                   "title": "### Other",
-                  "labels": []
-                }
+                  "labels": [],
+                },
               ],
               "label_extractor": [
                 {
