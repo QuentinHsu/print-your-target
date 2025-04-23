@@ -6,13 +6,14 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # 获取所有历史记录，以便查找上一个 tag
 
       - name: Set up Node.js
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v3
         with:
           node-version: '18' # 升级到 Node.js 18
 
@@ -28,15 +29,67 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Get version from package.json
+        id: get_version
+        run: echo "VERSION=$(jq -r .version package.json)" >> $GITHUB_ENV
+
+      - name: Get previous tag
+        id: get_previous_tag
+        run: echo "tag=$(git describe --tags --abbrev=0 HEAD^)" >> $GITHUB_OUTPUT
+
+      - name: Build Changelog
+        id: build_changelog
+        uses: mikepenz/release-changelog-builder-action@v5
+        with:
+          mode: "COMMIT"
+          fromTag: ${{ steps.get_previous_tag.outputs.tag }}
+          toTag: ${{ github.sha }}
+          configurationJson: |
+            {
+              "template": "#{{CHANGELOG}}",
+              "categories": [
+                {
+                  "title": "### Feature",
+                  "labels": ["feat", "feature"]
+                },
+                {
+                  "title": "### Fix",
+                  "labels": ["fix", "bug"]
+                },
+                {
+                  "title": "### Other",
+                  "labels": []
+                }
+              ],
+              "label_extractor": [
+                {
+                  "pattern": "^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test){1}(\\$[\\w\\-\\.]+\\$)?(!)?: ([\\w ])+([\\s\\S]*)",
+                  "on_property": "title",
+                  "target": "$1"
+                }
+              ]
+            }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate CHANGELOG file
+        run: |
+          # Prepend version header and latest changelog to CHANGELOG.md
+          echo -e "## ${{ env.VERSION }} - $(date +'%Y-%m-%d')\n${{ steps.build_changelog.outputs.changelog }}" | cat - CHANGELOG.md > CHANGELOG.tmp
+          mv CHANGELOG.tmp CHANGELOG.md
+          # 提交 CHANGELOG.md 文件
+          git config --local user.name "github-actions"
+          git config --local user.email "github-actions@github.com"
+          git add CHANGELOG.md
+          git commit -m "Update CHANGELOG.md"
+          git push
+          
+
       - name: Compile TypeScript
         run: pnpm run compile
 
       - name: Package extension
         run: pnpm run build:package
-
-      - name: Get version from package.json
-        id: get_version
-        run: echo "VERSION=$(jq -r .version package.json)" >> $GITHUB_ENV
 
       - name: Upload release asset
         uses: actions/upload-artifact@v4
@@ -47,7 +100,8 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.VERSION }} # 使用版本号作为 tag
+          tag_name: ${{ env.VERSION }} # 使用版本号作为 tag
           files: ./*.vsix
+          body: ${{ steps.build_changelog.outputs.changelog }} # 使用生成的 Changelog
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
