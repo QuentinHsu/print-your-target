@@ -1,5 +1,210 @@
 import * as vscode from 'vscode';
 
+// 辅助函数：分析 JavaScript 选择内容
+function analyzeJavaScriptSelection(
+	selectedText: string, 
+	document: vscode.TextDocument, 
+	selection: vscode.Selection, 
+	errorKeywords: string[]
+): { logMethod: string; logMessage: string; variableName: string } {
+	const trimmedText = selectedText.trim();
+	
+	// 如果没有选择文本，尝试智能选择当前词
+	if (!trimmedText) {
+		const wordRange = document.getWordRangeAtPosition(selection.start);
+		if (wordRange) {
+			const word = document.getText(wordRange);
+			return {
+				logMethod: 'log',
+				logMessage: word,
+				variableName: word
+			};
+		}
+		return {
+			logMethod: 'log',
+			logMessage: 'debug',
+			variableName: 'debug'
+		};
+	}
+
+	// 检测是否包含错误关键词
+	const containsErrorKeyword = errorKeywords.some(keyword => 
+		trimmedText.toLowerCase().includes(keyword.toLowerCase())
+	);
+
+	// 检测表达式类型
+	const isFunction = /\w+\s*\(.*\)/.test(trimmedText);
+	const isObject = /\{[\s\S]*\}/.test(trimmedText) || trimmedText.includes('.');
+	const isArray = /\[[\s\S]*\]/.test(trimmedText);
+	const isAsyncAwait = /\b(await|async)\b/.test(trimmedText);
+	const isPromise = /\.then\s*\(|\.catch\s*\(|new\s+Promise/.test(trimmedText);
+	const isConditional = /\?|\|\||&&/.test(trimmedText);
+
+	// 确定 console 方法
+	let logMethod = 'log';
+	if (containsErrorKeyword) {
+		logMethod = 'error';
+	} else if (isAsyncAwait || isPromise) {
+		logMethod = 'info';
+	} else if (isFunction) {
+		logMethod = 'debug';
+	} else if (isConditional) {
+		logMethod = 'warn';
+	}
+
+	// 生成描述性消息
+	let logMessage = trimmedText;
+	if (isFunction) {
+		const funcName = trimmedText.match(/(\w+)\s*\(/)?.[1];
+		logMessage = funcName ? `${funcName}() result` : 'function result';
+	} else if (isObject && trimmedText.includes('.')) {
+		logMessage = `${trimmedText} value`;
+	} else if (isArray) {
+		logMessage = `${trimmedText} array`;
+	}
+
+	// 提取变量名（用于对象展开等场景）
+	const variableName = trimmedText.match(/^\w+/)?.[0] || trimmedText;
+
+	return { logMethod, logMessage, variableName };
+}
+
+// 辅助函数：生成 console 语句
+function generateConsoleStatement(
+	logMethod: string, 
+	logMessage: string, 
+	variableName: string, 
+	selectedText: string
+): string {
+	const trimmedText = selectedText.trim();
+	
+	// 如果是复杂表达式，使用对象形式打印
+	if (trimmedText.includes('.') || trimmedText.includes('(') || trimmedText.includes('[')) {
+		return `console.${logMethod}('${logMessage}:', { ${variableName}: ${trimmedText} });`;
+	}
+	
+	// 统一使用简洁格式，不带 emoji
+	return `console.${logMethod}('${logMessage}:', ${trimmedText});`;
+}
+
+// 辅助函数：找到 JavaScript 插入位置
+function findJavaScriptInsertionPoint(
+	document: vscode.TextDocument,
+	editor: vscode.TextEditor,
+	selection: vscode.Selection,
+	baseLog: string
+): { insertPosition: vscode.Position; finalStatement: string } {
+	const endLine = selection.end.line;
+	const selectedText = document.getText(selection).trim();
+	
+	// 获取选择所在行的缩进作为基准
+	const selectionLineText = document.lineAt(endLine).text;
+	const selectionIndentMatch = selectionLineText.match(/^\s*/);
+	const selectionIndent = selectionIndentMatch ? selectionIndentMatch[0] : '';
+
+	let targetLineNumber = -1;
+	let indent = selectionIndent;
+
+	// 检查是否是简单的变量选择（不包含复杂表达式）
+	const isSimpleVariable = /^\w+$/.test(selectedText);
+	
+	// 对于简单变量选择，直接在当前行下方插入
+	if (isSimpleVariable) {
+		targetLineNumber = endLine + 1;
+	}
+	// 对于复杂表达式或语句，查找合适的插入位置
+	else {
+		const currentLineText = document.lineAt(endLine).text.trim();
+		
+		// 当前行就是完整语句
+		if (currentLineText.endsWith(';')) {
+			targetLineNumber = endLine + 1;
+		}
+		// 查找当前语句的结束位置
+		else {
+			let statementEndFound = false;
+			
+			// 在合理范围内查找语句结束
+			for (let i = endLine + 1; i < Math.min(endLine + 5, document.lineCount); i++) {
+				const line = document.lineAt(i);
+				const text = line.text;
+				const lineIndentMatch = text.match(/^\s*/);
+				const lineIndent = lineIndentMatch ? lineIndentMatch[0] : '';
+				
+				// 如果遇到缩进明显减少的行，说明退出了当前块
+				if (text.trim().length > 0 && lineIndent.length < selectionIndent.length) {
+					// 在当前选择行的下一行插入（保持在当前块内）
+					targetLineNumber = endLine + 1;
+					statementEndFound = true;
+					break;
+				}
+				
+				// 查找语句结束符
+				if (text.trim().endsWith(';')) {
+					targetLineNumber = i + 1;
+					statementEndFound = true;
+					break;
+				}
+				
+				// 遇到块结束符（右大括号）
+				if (text.trim() === '}' || text.trim().startsWith('}')) {
+					// 在右大括号之前插入
+					targetLineNumber = i;
+					statementEndFound = true;
+					break;
+				}
+			}
+			
+			// 如果没找到明确的结束位置，默认在下一行插入
+			if (!statementEndFound) {
+				targetLineNumber = endLine + 1;
+			}
+		}
+	}
+
+	// 处理文档边界
+	if (targetLineNumber >= document.lineCount) {
+		targetLineNumber = document.lineCount;
+		const lastLine = document.lineAt(document.lineCount - 1);
+		if (lastLine.text.trim().length === 0) {
+			targetLineNumber = document.lineCount - 1;
+		}
+	}
+
+	const insertPosition = new vscode.Position(targetLineNumber, 0);
+	const finalStatement = indent + baseLog + '\n';
+
+	return { insertPosition, finalStatement };
+}
+
+// 辅助函数：检查是否在块结构内部
+function checkIfInsideBlock(document: vscode.TextDocument, lineNumber: number): boolean {
+	// 向上查找，看是否有未闭合的块结构
+	let openBraces = 0;
+	const maxLookback = Math.min(lineNumber, 20); // 最多向上查找20行
+	
+	for (let i = lineNumber; i >= lineNumber - maxLookback; i--) {
+		const line = document.lineAt(i);
+		const text = line.text;
+		
+		// 计算大括号平衡
+		for (const char of text) {
+			if (char === '{') {
+				openBraces++;
+			} else if (char === '}') {
+				openBraces--;
+			}
+		}
+		
+		// 如果发现了控制结构（if, for, while等）且有未闭合的大括号
+		if (openBraces > 0 && /^\s*(if|for|while|switch|try|catch|else|function)\s*[\(\{]/.test(text)) {
+			return true;
+		}
+	}
+	
+	return openBraces > 0;
+}
+
 export function activate(context: vscode.ExtensionContext) {
 	let disposable = vscode.commands.registerCommand('print-your-target.addLogStatement', async () => { // Mark function as async
 		const editor = vscode.window.activeTextEditor;
@@ -45,68 +250,19 @@ export function activate(context: vscode.ExtensionContext) {
 		switch (languageCategory) {
 			case 'javascript':
 				{ // Use block scope for clarity
-					const baseLog = errorKeywords.includes(selectedText)
-						? `console.error('${selectedText}', ${selectedText});`
-						: `console.log('${selectedText}', ${selectedText});`;
+					// 智能检测选择的内容和上下文
+					const { logMethod, logMessage, variableName } = analyzeJavaScriptSelection(selectedText, document, selection, errorKeywords);
+					
+					// 生成 console 语句
+					const baseLog = generateConsoleStatement(logMethod, logMessage, variableName, selectedText);
 
 					// --- Start: Find Insertion Point Logic ---
-					let targetLineNumber = -1;
-					let indent = '';
-					const startLine = selection.start.line;
-					const endLine = selection.end.line;
-
-					// Heuristic: Look for an opening brace '{' after the selection
-					// Search from the end line downwards for a few lines
-					let blockFound = false;
-					for (let i = endLine; i < Math.min(endLine + 5, document.lineCount); i++) {
-						const line = document.lineAt(i);
-						const braceIndex = line.text.indexOf('{');
-						// Ensure brace is not part of the selection itself if selection spans multiple lines
-						if (braceIndex !== -1 && (i > endLine || braceIndex > selection.end.character)) {
-							targetLineNumber = i + 1; // Insert on the line *after* the brace
-							const blockIndentMatch = line.text.match(/^\s*/);
-							const blockIndent = blockIndentMatch ? blockIndentMatch[0] : '';
-							// Use editor's tab settings for indentation inside the block
-							const tabSize = typeof editor.options.tabSize === 'number' ? editor.options.tabSize : 4;
-							const indentChar = editor.options.insertSpaces ? ' ' : '\t';
-							indent = blockIndent + indentChar.repeat(editor.options.insertSpaces ? tabSize : 1);
-							blockFound = true;
-							break;
-						}
-						// If we encounter a closing brace before an opening one, stop searching in this direction
-						if (line.text.includes('}')) {
-							break;
-						}
-					}
-
-					// If no opening brace found nearby, insert after the line containing the end of the selection
-					if (!blockFound) {
-						targetLineNumber = endLine + 1;
-						const endLineText = document.lineAt(endLine).text;
-						const currentIndentMatch = endLineText.match(/^\s*/);
-						indent = currentIndentMatch ? currentIndentMatch[0] : ''; // Use indentation of the current line
-					}
-
-					// Ensure target line is within document bounds
-					if (targetLineNumber >= document.lineCount) {
-						// If inserting after the last line, add a newline first if needed
-						const lastLine = document.lineAt(document.lineCount - 1);
-						if (lastLine.text.trim().length > 0) {
-							await editor.edit(editBuilder => {
-								editBuilder.insert(lastLine.range.end, '\n');
-							});
-							targetLineNumber = document.lineCount; // It will be the new last line index + 1
-						} else {
-							targetLineNumber = document.lineCount - 1; // Insert on the empty last line
-						}
-						// Recalculate indent if we are now on a potentially different line
-						const currentIndentMatch = document.lineAt(endLine).text.match(/^\s*/);
-						indent = currentIndentMatch ? currentIndentMatch[0] : '';
-					}
-
-
-					insertPosition = new vscode.Position(targetLineNumber, 0); // Insert at the beginning of the target line
-					finalLogStatement = indent + baseLog + '\n';
+					const { insertPosition: pos, finalStatement } = findJavaScriptInsertionPoint(
+						document, editor, selection, baseLog
+					);
+					
+					insertPosition = pos;
+					finalLogStatement = finalStatement;
 					// --- End: Find Insertion Point Logic ---
 				}
 				break;
@@ -179,8 +335,10 @@ export function activate(context: vscode.ExtensionContext) {
 
 		// 从插件配置中获取日志类型
 		const config = vscode.workspace.getConfiguration('printYourTarget');
-		const deleteLogTypesJavaScript: string[] = config.get('deleteLogType.javascript', ['log', 'error', 'warn', 'info', 'debug']); // Added more types
-		const deleteLogTypesGo: string[] = config.get('deleteLogType.go', ['Printf', 'Println', 'Fatalf', 'Panicf']); // Added more types
+		const deleteLogTypesJavaScript: string[] = config.get('deleteLogType.javascript', [
+			'log', 'error', 'warn', 'info', 'debug', 'trace', 'table', 'group', 'groupEnd'
+		]); // 扩展支持更多 console 方法
+		const deleteLogTypesGo: string[] = config.get('deleteLogType.go', ['Printf', 'Println', 'Fatalf', 'Panicf']);
 
 		// 根据语言类型构建正则表达式
 		let logRegex: RegExp | null = null;
@@ -189,13 +347,11 @@ export function activate(context: vscode.ExtensionContext) {
 		const jsTsIds = ['javascript', 'typescript', 'javascriptreact', 'typescriptreact', 'vue', 'svelte', 'astro', 'html']; // Broader JS family
 
 		if (jsTsIds.includes(languageId)) {
-			// Matches console.log(...); console.error(...); etc. potentially across lines
-			// This regex is complex and might need refinement for edge cases (e.g., nested calls)
-			// It tries to match balanced parentheses.
-			// Simpler approach: Match the line containing console.log/error etc.
-			// logRegex = /console\.(log|error|warn|info|debug)\s*\((?:[^)(]+|\((?:[^)(]+|\([^)(]*\))*\))*\)\s*;?/g;
-			lineRegex = new RegExp(`^\\s*console\\.(${deleteLogTypesJavaScript.join('|')})\\s*\\(.*\\);?\\s*$`, 'gm');
-
+			// 匹配标准 console 语句格式：
+			// - console.log('message:', variable);
+			// - console.error('message:', variable);  
+			// - console.log('message:', { variable: value });
+			lineRegex = new RegExp(`^\\s*console\\.(${deleteLogTypesJavaScript.join('|')})\\s*\\([^)]*\\)\\s*;?\\s*$`, 'gm');
 		} else if (languageId === 'go') {
 			// Matches log.Printf(...), log.Println(...) etc.
 			lineRegex = new RegExp(`^\\s*log\\.(${deleteLogTypesGo.join('|')})\\s*\\(.*\\)\\s*$`, 'gm');
