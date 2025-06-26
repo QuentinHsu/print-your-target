@@ -22,17 +22,17 @@ jobs:
         run: |
           # 获取当前的 package.json 版本
           CURRENT_VERSION=$(jq -r .version package.json)
-          
+
           # 获取上一个提交的 package.json 版本
           git checkout HEAD~1 -- package.json
           PREVIOUS_VERSION=$(jq -r .version package.json)
-          
+
           # 恢复当前的 package.json
           git checkout HEAD -- package.json
-          
+
           echo "Previous version: $PREVIOUS_VERSION"
           echo "Current version: $CURRENT_VERSION"
-          
+
           # 检查版本是否发生变化
           if [ "$CURRENT_VERSION" != "$PREVIOUS_VERSION" ]; then
             echo "Version changed from $PREVIOUS_VERSION to $CURRENT_VERSION"
@@ -49,7 +49,7 @@ jobs:
         run: |
           NEW_VERSION="${{ steps.version-check.outputs.new-version }}"
           echo "Extracting changelog for version $NEW_VERSION from CHANGELOG.md"
-          
+
           if [ -f CHANGELOG.md ]; then
             # 查找当前版本的 changelog 条目
             VERSION_START=$(grep -n "^## \[$NEW_VERSION\]" CHANGELOG.md | cut -d: -f1)
@@ -76,40 +76,52 @@ jobs:
               cat release-changelog.txt
             else
               echo "Warning: No changelog entry found for version $NEW_VERSION in CHANGELOG.md"
-              echo "Falling back to default release notes"
+              echo "Extracting changelog from PR description"
               
-              # 从 PR 描述作为后备方案
-              PR_NUMBER="${{ github.event.pull_request.number }}"
-              cat > release-changelog.txt << EOF
+              # 从 PR 描述中提取 changelog 内容
+              PR_BODY="${{ github.event.pull_request.body }}"
+              
+              # 如果 PR 描述为空，使用默认内容
+              if [ -z "$PR_BODY" ] || [ "$PR_BODY" = "null" ]; then
+                echo "PR description is empty, using default release notes"
+                cat > release-changelog.txt << EOF
           ### Changed / 变更
           - Release v${NEW_VERSION}
           - 发布 v${NEW_VERSION} 版本
-          
-          Changes merged from PR #${PR_NUMBER}
-          合并来自 PR #${PR_NUMBER} 的更改
           EOF
+              else
+                echo "Using PR description as changelog content"
+                echo "$PR_BODY" > release-changelog.txt
+              fi
             fi
             
             # 清理临时文件
             rm -f temp_changelog.txt
           else
-            echo "CHANGELOG.md not found, using default release notes"
-            PR_NUMBER="${{ github.event.pull_request.number }}"
-            cat > release-changelog.txt << EOF
+            echo "CHANGELOG.md not found, extracting changelog from PR description"
+            
+            # 从 PR 描述中提取 changelog 内容
+            PR_BODY="${{ github.event.pull_request.body }}"
+            
+            # 如果 PR 描述为空，使用默认内容
+            if [ -z "$PR_BODY" ] || [ "$PR_BODY" = "null" ]; then
+              echo "PR description is empty, using default release notes"
+              cat > release-changelog.txt << EOF
           ### Changed / 变更
           - Release v${NEW_VERSION}
           - 发布 v${NEW_VERSION} 版本
-          
-          Changes merged from PR #${PR_NUMBER}
-          合并来自 PR #${PR_NUMBER} 的更改
           EOF
+            else
+              echo "Using PR description as changelog content"
+              echo "$PR_BODY" > release-changelog.txt
+            fi
           fi
 
       - name: Update CHANGELOG.md in main branch
         if: steps.version-check.outputs.version-changed == 'true'
         run: |
           NEW_VERSION="${{ steps.version-check.outputs.new-version }}"
-          
+
           # 检查 CHANGELOG.md 是否已包含新版本
           if ! grep -q "^## \[$NEW_VERSION\]" CHANGELOG.md; then
             echo "CHANGELOG.md does not contain version $NEW_VERSION, updating it"
@@ -170,7 +182,7 @@ jobs:
         if: steps.version-check.outputs.version-changed == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: '18' # 升级到 Node.js 18
+          node-version: "18" # 升级到 Node.js 18
 
       - name: Enable Corepack
         if: steps.version-check.outputs.version-changed == 'true'
