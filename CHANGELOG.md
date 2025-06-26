@@ -1,6 +1,11 @@
 ## 0.0.3 - 2025-04-23
 ## 🚀 Features
 
+## [0.0.4] - 2025-06-26
+
+### Refactor / 重构
+- 重构了 console 语句的插入逻辑
+
 - feat: lower the minimum supported version of VSCode
 - feat: add CHANGELOG generation and commit step in release workflow
 - feat: add templates for changelog entries in release workflow
