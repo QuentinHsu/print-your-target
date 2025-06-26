@@ -8,7 +8,7 @@ on:
 jobs:
   check-version:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout PR code
         uses: actions/checkout@v4
@@ -26,13 +26,13 @@ jobs:
         run: |
           # 获取 PR 中的版本
           PR_VERSION=$(jq -r .version package.json)
-          
+
           # 获取基础分支的版本
           BASE_VERSION=$(jq -r .version base/package.json)
-          
+
           echo "Base version: $BASE_VERSION"
           echo "PR version: $PR_VERSION"
-          
+
           if [ "$PR_VERSION" != "$BASE_VERSION" ]; then
             echo "✅ Version changed from $BASE_VERSION to $PR_VERSION"
             echo "🚀 This PR will trigger a release when merged!"
@@ -45,80 +45,6 @@ jobs:
             echo "version-changed=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Extract changelog from PR
-        id: extract-changelog
-        if: steps.version-check.outputs.version-changed == 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const prBody = context.payload.pull_request.body || '';
-            
-            console.log('Original PR Body:', prBody);
-            
-            // 先清理整个 PR 描述中的 HTML 注释
-            const cleanedPrBody = prBody.replace(/<!--[\s\S]*?-->/g, '').trim();
-            console.log('PR Body after removing comments:', cleanedPrBody);
-            
-            // 查找 ## Changelog 或 ## 更新日志 部分（在清理后的内容中查找）
-            const changelogRegex = /(?:^|\n)##\s*(?:Changelog|更新日志|CHANGELOG)\s*\n([\s\S]*?)(?=\n##|\n---|\n```|$)/i;
-            const match = cleanedPrBody.match(changelogRegex);
-            
-            let changelog = '';
-            if (match && match[1]) {
-              changelog = match[1].trim();
-              console.log('Extracted changelog from ## section:', changelog);
-            }
-            
-            // 如果没有找到 changelog 部分，检查是否整个 PR 描述都是 changelog
-            if (!changelog && cleanedPrBody.trim()) {
-              // 检查清理后的内容是否包含常见的 changelog 关键词
-              const changelogKeywords = ['Feature', 'Fixed', 'Changed', 'Added', 'Removed', 'feat', 'fix', 'add', 'update', 'remove', '新增', '修复', '更新', '删除', '功能', '变更'];
-              const hasChangelogKeywords = changelogKeywords.some(keyword => 
-                cleanedPrBody.toLowerCase().includes(keyword.toLowerCase())
-              );
-              
-              // 只有在清理后的内容有实际内容且包含关键词时才使用
-              if (hasChangelogKeywords && cleanedPrBody.length > 0) {
-                changelog = cleanedPrBody;
-                console.log('Using entire cleaned PR body as changelog');
-              }
-            }
-            
-            // 检查提取的 changelog 是否只是模板内容
-            if (changelog && changelog.trim()) {
-              // 检查是否包含模板关键词，如果是模板则清空
-              const templateKeywords = [
-                'If this PR requires a new version',
-                '如果这个 PR 需要发布新版本',
-                'please write the changelog below',
-                '请在下面写明更新日志',
-                'Suggested format',
-                '格式建议',
-                'Example / 示例',
-                'New feature description',
-                'Bug fix description',
-                'Feature change description',
-                'Removed feature description'
-              ];
-              
-              const isTemplate = templateKeywords.some(keyword => 
-                changelog.toLowerCase().includes(keyword.toLowerCase())
-              );
-              
-              if (isTemplate) {
-                console.log('Detected template content, clearing changelog');
-                changelog = '';
-              }
-            }
-            
-            console.log('Final extracted changelog:', changelog);
-            
-            // 输出到 GitHub Actions
-            const fs = require('fs');
-            fs.writeFileSync('changelog.txt', changelog);
-            
-            return { changelog: changelog };
-
       - name: Comment on PR
         uses: actions/github-script@v7
         with:
@@ -126,40 +52,27 @@ jobs:
             const versionChanged = '${{ steps.version-check.outputs.version-changed }}' === 'true';
             const prVersion = '${{ steps.version-check.outputs.pr-version }}';
             const baseVersion = '${{ steps.version-check.outputs.base-version }}';
-            
+
             let message;
             if (versionChanged) {
-              // 读取提取的 changelog
-              const fs = require('fs');
-              let changelog = '';
-              try {
-                changelog = fs.readFileSync('changelog.txt', 'utf8').trim();
-              } catch (e) {
-                console.log('No changelog file found');
-              }
-              
-              if (changelog) {
-                message = `🚀 **Release will be triggered!**\n\nVersion will change from \`${baseVersion}\` to \`${prVersion}\` when this PR is merged.\n\n**📝 Changelog detected:**\n\n\n${changelog}\n\n\nA new release will be automatically created with tag \`v${prVersion}\` including the above changelog.`;
-              } else {
-                message = `🚀 **Release will be triggered!**\n\nVersion will change from \`${baseVersion}\` to \`${prVersion}\` when this PR is merged.\n\n⚠️ **No changelog detected** in PR description. Consider adding a \`## Changelog\` section to document your changes.\n\n**How to add changelog:**\n1. Edit this PR description\n2. Add a section like this:\nmarkdown\n## Changelog\n\n### Feature\n- New feature description\n\n### Fixed\n- Bug fix description\n\n### Changed\n- Change description\n\n\nA new release will be automatically created with tag \`v${prVersion}\`.`;
-              }
+              message = `🚀 **Ready for Release!**\n\nVersion will change from \`${baseVersion}\` to \`${prVersion}\` when this PR is merged.\n\n📝 **Please edit the comment below to add changelog, then comment \`/release\` to trigger the release:**`;
             } else {
               message = `📝 **No release will be triggered**\n\nThe version in \`package.json\` has not been changed (still \`${baseVersion}\`).\n\nTo trigger a release, please update the \`version\` field in \`package.json\`.`;
             }
-            
+
             // 查找已存在的评论
             const comments = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
             });
-            
+
             const botComment = comments.data.find(comment => 
               comment.user.type === 'Bot' && 
-              (comment.body.includes('Release will be triggered') || 
+              (comment.body.includes('Ready for Release') || 
                comment.body.includes('No release will be triggered'))
             );
-            
+
             if (botComment) {
               // 更新已存在的评论
               await github.rest.issues.updateComment({
@@ -175,5 +88,46 @@ jobs:
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
                 body: message
+              });
+            }
+
+      - name: Create changelog template comment
+        if: steps.version-check.outputs.version-changed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prVersion = '${{ steps.version-check.outputs.pr-version }}';
+
+            const changelogTemplate = "## Changelog\\n\\n" +
+              "**Please edit this comment to add your changelog content, then comment \`/release\` to trigger the release**\\n\\n" +
+              "### Added\\n" +
+              "- (add your new features here)\\n\\n" +
+              "### Fixed\\n" +
+              "- (add your bug fixes here)\\n\\n" +
+              "### Changed\\n" +
+              "- (add your changes here)\\n\\n" +
+              "### Removed\\n" +
+              "- (add removed features here)";
+
+            // 查找是否已存在 changelog 模板评论
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const changelogComment = comments.data.find(comment => 
+              comment.user.type === 'Bot' && 
+              comment.body.includes('## Changelog') &&
+              comment.body.includes('Please edit this comment')
+            );
+
+            if (!changelogComment) {
+              // 创建新的 changelog 模板评论
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: changelogTemplate
               });
             }

@@ -1,283 +1,240 @@
 name: Release
 
 on:
-  pull_request:
-    types: [closed]
-    branches: [main]
+  issue_comment:
+    types: [created]
 
 jobs:
-  check-version-and-release:
-    # 只有当 PR 被合并到 main 分支时才运行
-    if: github.event.pull_request.merged == true
+  release:
+    if: github.event.issue.pull_request && github.event.comment.body == '/release'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Check if commenter has write permission
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: collaborators } = await github.rest.repos.listCollaborators({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+
+            const commenter = context.payload.comment.user.login;
+            const hasWriteAccess = collaborators.some(collaborator => 
+              collaborator.login === commenter && 
+              ['admin', 'write'].includes(collaborator.permissions.permission)
+            );
+
+            if (!hasWriteAccess) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `❌ **Permission denied**: @${commenter} does not have write permission to trigger releases.`
+              });
+              throw new Error('User does not have write permission');
+            }
+
+            console.log(`✅ User ${commenter} has write permission`);
+
+      - name: Get PR details
+        id: pr-details
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.issue.number;
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            // Check if PR is merged
+            if (!pr.merged) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `❌ **Cannot release**: This PR is not merged yet. Please merge the PR first before triggering a release.`
+              });
+              throw new Error('PR is not merged');
+            }
+
+            return {
+              merged: pr.merged,
+              merge_commit_sha: pr.merge_commit_sha,
+              head_sha: pr.head.sha,
+              base_ref: pr.base.ref
+            };
+
+      - name: Checkout merged code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2 # 获取前两个提交以比较差异
+          ref: ${{ fromJson(steps.pr-details.outputs.result).merge_commit_sha }}
 
-      - name: Check if package.json version changed
-        id: version-check
+      - name: Get version from package.json
+        id: get-version
         run: |
-          # 获取当前的 package.json 版本
-          CURRENT_VERSION=$(jq -r .version package.json)
+          VERSION=$(jq -r .version package.json)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $VERSION"
 
-          # 获取上一个提交的 package.json 版本
-          git checkout HEAD~1 -- package.json
-          PREVIOUS_VERSION=$(jq -r .version package.json)
-
-          # 恢复当前的 package.json
-          git checkout HEAD -- package.json
-
-          echo "Previous version: $PREVIOUS_VERSION"
-          echo "Current version: $CURRENT_VERSION"
-
-          # 检查版本是否发生变化
-          if [ "$CURRENT_VERSION" != "$PREVIOUS_VERSION" ]; then
-            echo "Version changed from $PREVIOUS_VERSION to $CURRENT_VERSION"
-            echo "version-changed=true" >> $GITHUB_OUTPUT
-            echo "new-version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-          else
-            echo "Version not changed, skipping release"
-            echo "version-changed=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Extract changelog from CHANGELOG.md
+      - name: Extract changelog from comment
         id: extract-changelog
-        if: steps.version-check.outputs.version-changed == 'true'
-        run: |
-          NEW_VERSION="${{ steps.version-check.outputs.new-version }}"
-          echo "Extracting changelog for version $NEW_VERSION from CHANGELOG.md"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // 获取所有评论
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
 
-          if [ -f CHANGELOG.md ]; then
-            # 查找当前版本的 changelog 条目
-            VERSION_START=$(grep -n "^## \[$NEW_VERSION\]" CHANGELOG.md | cut -d: -f1)
-            
-            if [ -n "$VERSION_START" ]; then
-              echo "Found changelog entry for version $NEW_VERSION at line $VERSION_START"
-              
-              # 查找下一个版本的开始位置
-              NEXT_VERSION_LINE=$(tail -n +$((VERSION_START + 1)) CHANGELOG.md | grep -n "^## " | head -1 | cut -d: -f1)
-              
-              if [ -n "$NEXT_VERSION_LINE" ]; then
-                # 有下一个版本，提取到下一个版本之前
-                VERSION_END=$((VERSION_START + NEXT_VERSION_LINE - 1))
-                sed -n "${VERSION_START},${VERSION_END}p" CHANGELOG.md | tail -n +2 | head -n -1 > temp_changelog.txt
-              else
-                # 没有下一个版本，提取到文件末尾
-                sed -n "${VERSION_START},\$p" CHANGELOG.md | tail -n +2 > temp_changelog.txt
-              fi
-              
-              # 移除空行和日期行，只保留实际的 changelog 内容
-              sed '/^$/d; /^## \[.*\] - [0-9]/d' temp_changelog.txt > release-changelog.txt
-              
-              echo "Extracted changelog content:"
-              cat release-changelog.txt
-            else
-              echo "Warning: No changelog entry found for version $NEW_VERSION in CHANGELOG.md"
-              echo "Extracting changelog from PR description"
-              
-              # 从 PR 描述中提取 changelog 内容，使用与 PR workflow 相同的逻辑
-              PR_BODY="${{ github.event.pull_request.body }}"
-              
-              # 如果 PR 描述为空，使用默认内容
-              if [ -z "$PR_BODY" ] || [ "$PR_BODY" = "null" ]; then
-                echo "PR description is empty, using default release notes"
-                cat > release-changelog.txt << EOF
-          ### Changed / 变更
-          - Release v${NEW_VERSION}
-          - 发布 v${NEW_VERSION} 版本
-          EOF
-              else
-                echo "Extracting changelog from PR description using safer logic"
-                
-                # 移除 HTML 注释
-                PR_BODY_CLEAN=$(echo "$PR_BODY" | sed '/<!--/,/-->/d')
-                
-                # 尝试提取 ## Changelog 部分
-                CHANGELOG_SECTION=$(echo "$PR_BODY_CLEAN" | sed -n '/^## *[Cc]hangelog/,/^## /p' | sed '$d' | tail -n +2)
-                
-                if [ -n "$CHANGELOG_SECTION" ] && [ "$CHANGELOG_SECTION" != "" ]; then
-                  # 检查是否包含模板内容
-                  if echo "$CHANGELOG_SECTION" | grep -qi -E "(format.*建议|example.*示例|batch.*copy|keyboard.*shortcut|minimum.*supported|CHANGELOG.*generation)"; then
-                    echo "Detected template/example content in PR, using default changelog"
-                    cat > release-changelog.txt << EOF
-          ### Changed / 变更
-          - Release v${NEW_VERSION}
-          - 发布 v${NEW_VERSION} 版本
-          EOF
-                  else
-                    echo "Using extracted changelog section from PR"
-                    echo "$CHANGELOG_SECTION" > release-changelog.txt
-                  fi
-                else
-                  echo "No valid changelog section found in PR, using default"
-                  cat > release-changelog.txt << EOF
-          ### Changed / 变更
-          - Release v${NEW_VERSION}
-          - 发布 v${NEW_VERSION} 版本
-          EOF
-                fi
-              fi
-            fi
-            
-            # 清理临时文件
-            rm -f temp_changelog.txt
-          else
-            echo "CHANGELOG.md not found, extracting changelog from PR description"
-            
-            # 从 PR 描述中提取 changelog 内容，使用相同的安全逻辑
-            PR_BODY="${{ github.event.pull_request.body }}"
-            
-            # 如果 PR 描述为空，使用默认内容
-            if [ -z "$PR_BODY" ] || [ "$PR_BODY" = "null" ]; then
-              echo "PR description is empty, using default release notes"
-              cat > release-changelog.txt << EOF
-          ### Changed / 变更
-          - Release v${NEW_VERSION}
-          - 发布 v${NEW_VERSION} 版本
-          EOF
-            else
-              echo "Extracting changelog from PR description using safer logic"
-              
-              # 移除 HTML 注释
-              PR_BODY_CLEAN=$(echo "$PR_BODY" | sed '/<!--/,/-->/d')
-              
-              # 尝试提取 ## Changelog 部分
-              CHANGELOG_SECTION=$(echo "$PR_BODY_CLEAN" | sed -n '/^## *[Cc]hangelog/,/^## /p' | sed '$d' | tail -n +2)
-              
-              if [ -n "$CHANGELOG_SECTION" ] && [ "$CHANGELOG_SECTION" != "" ]; then
-                # 检查是否包含模板内容
-                if echo "$CHANGELOG_SECTION" | grep -qi -E "(format.*建议|example.*示例|batch.*copy|keyboard.*shortcut|minimum.*supported|CHANGELOG.*generation)"; then
-                  echo "Detected template/example content in PR, using default changelog"
-                  cat > release-changelog.txt << EOF
-          ### Changed / 变更
-          - Release v${NEW_VERSION}
-          - 发布 v${NEW_VERSION} 版本
-          EOF
-                else
-                  echo "Using extracted changelog section from PR"
-                  echo "$CHANGELOG_SECTION" > release-changelog.txt
-                fi
-              else
-                echo "No valid changelog section found in PR, using default"
-                cat > release-changelog.txt << EOF
-          ### Changed / 变更
-          - Release v${NEW_VERSION}
-          - 发布 v${NEW_VERSION} 版本
-          EOF
-              fi
-            fi
-          fi
+            // 查找最新的 changelog 模板评论
+            const changelogComments = comments.data.filter(comment => 
+              comment.body.includes('## Changelog') &&
+              (comment.body.includes('Please edit this comment') || 
+               comment.body.includes('add your') ||
+               !comment.body.includes('Please edit this comment'))  // 包括已编辑的
+            ).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
 
-      - name: Update CHANGELOG.md in main branch
-        if: steps.version-check.outputs.version-changed == 'true'
-        run: |
-          NEW_VERSION="${{ steps.version-check.outputs.new-version }}"
+            if (changelogComments.length === 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `❌ **No changelog found**: Please create a changelog comment first using the template provided when the version was changed.`
+              });
+              throw new Error('No changelog comment found');
+            }
 
-          # 检查 CHANGELOG.md 是否已包含新版本
-          if ! grep -q "^## \[$NEW_VERSION\]" CHANGELOG.md; then
-            echo "CHANGELOG.md does not contain version $NEW_VERSION, updating it"
-            
-            # 从 release-changelog.txt 读取内容
-            if [ -f release-changelog.txt ]; then
-              CHANGELOG_CONTENT=$(cat release-changelog.txt)
-              CURRENT_DATE=$(date +"%Y-%m-%d")
-              
-              # 创建新的版本条目
-              TEMP_ENTRY=$(mktemp)
-              cat > "$TEMP_ENTRY" << EOF
-          ## [$NEW_VERSION] - $CURRENT_DATE
+            const latestChangelogComment = changelogComments[0];
+            let changelog = latestChangelogComment.body;
 
-          $CHANGELOG_CONTENT
+            // 移除 "Please edit this comment" 说明文字
+            changelog = changelog.replace(/\*\*Please edit this comment[^*]*\*\*\s*/g, '');
 
-          EOF
-              
-              # 将新条目插入到 CHANGELOG.md 的开头（在标题之后）
-              if [ -f CHANGELOG.md ]; then
-                {
-                  head -n 3 CHANGELOG.md 2>/dev/null || echo -e "# Change Log\n\n"
-                  cat "$TEMP_ENTRY"
-                  tail -n +4 CHANGELOG.md 2>/dev/null || true
-                } > CHANGELOG_temp.md
-                mv CHANGELOG_temp.md CHANGELOG.md
-              else
-                {
-                  echo "# Change Log"
-                  echo ""
-                  echo ""
-                  cat "$TEMP_ENTRY"
-                } > CHANGELOG.md
-              fi
-              
-              # 提交更新的 CHANGELOG.md
-              git config --local user.email "action@github.com"
-              git config --local user.name "GitHub Action"
-              git add CHANGELOG.md
-              
-              if ! git diff --staged --quiet; then
-                git commit -m "docs: update CHANGELOG.md for v$NEW_VERSION (release)"
-                git push origin main
-                echo "CHANGELOG.md updated and committed to main branch"
-              else
-                echo "No changes to CHANGELOG.md needed"
-              fi
-              
-              rm -f "$TEMP_ENTRY"
-            else
-              echo "No release-changelog.txt found, skipping CHANGELOG.md update"
-            fi
-          else
-            echo "CHANGELOG.md already contains version $NEW_VERSION"
-          fi
+            // 检查是否还是模板内容（包含提示文字）
+            const isStillTemplate = changelog.includes('(add your') || 
+                                   changelog.includes('add your new features here') ||
+                                   changelog.includes('add your bug fixes here');
+
+            if (isStillTemplate) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `❌ **Changelog not ready**: The changelog comment still contains template placeholders. Please edit the changelog comment to add real changelog content before triggering the release.`
+              });
+              throw new Error('Changelog is still template');
+            }
+
+            console.log('Extracted changelog:', changelog);
+
+            // 写入文件供后续步骤使用
+            const fs = require('fs');
+            fs.writeFileSync('changelog.md', changelog.trim());
+
+            return { changelog: changelog.trim() };
 
       - name: Set up Node.js
-        if: steps.version-check.outputs.version-changed == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: "18" # 升级到 Node.js 18
+          node-version: "18"
 
       - name: Enable Corepack
-        if: steps.version-check.outputs.version-changed == 'true'
         run: corepack enable
 
       - name: Install pnpm
-        if: steps.version-check.outputs.version-changed == 'true'
         run: corepack prepare pnpm@latest --activate
 
       - name: Install vsce
-        if: steps.version-check.outputs.version-changed == 'true'
         run: npm add -g vsce
 
       - name: Install dependencies
-        if: steps.version-check.outputs.version-changed == 'true'
         run: pnpm install
 
       - name: Compile TypeScript
-        if: steps.version-check.outputs.version-changed == 'true'
         run: pnpm run compile
 
       - name: Package extension
-        if: steps.version-check.outputs.version-changed == 'true'
         run: pnpm run build:package
 
       - name: Upload release asset
-        if: steps.version-check.outputs.version-changed == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.repository.name }}-${{ steps.version-check.outputs.new-version }}.vsix
+          name: ${{ github.event.repository.name }}-${{ steps.get-version.outputs.version }}.vsix
           path: ./*.vsix
 
-      - name: Create Release
-        if: steps.version-check.outputs.version-changed == 'true'
-        uses: softprops/action-gh-release@v2
+      - name: Create GitHub Release
+        id: create-release
+        uses: actions/github-script@v7
         with:
-          tag_name: v${{ steps.version-check.outputs.new-version }}
-          name: Release v${{ steps.version-check.outputs.new-version }}
-          body_path: release-changelog.txt
-          files: ./*.vsix
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const version = '${{ steps.get-version.outputs.version }}';
+            const tagName = `v${version}`;
+
+            // 读取 changelog
+            const fs = require('fs');
+            const changelog = fs.readFileSync('changelog.md', 'utf8');
+
+            try {
+              const { data: release } = await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: tagName,
+                name: `Release ${tagName}`,
+                body: changelog,
+                draft: false,
+                prerelease: false,
+                target_commitish: '${{ fromJson(steps.pr-details.outputs.result).merge_commit_sha }}'
+              });
+              
+              console.log(`Created release: ${release.html_url}`);
+              
+              // 上传 .vsix 文件到 release
+              const files = fs.readdirSync('.').filter(f => f.endsWith('.vsix'));
+              if (files.length > 0) {
+                const vsixFile = files[0];
+                const fileData = fs.readFileSync(vsixFile);
+                
+                await github.rest.repos.uploadReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: release.id,
+                  name: vsixFile,
+                  data: fileData,
+                });
+                
+                console.log(`Uploaded ${vsixFile} to release`);
+              }
+              
+              // 评论成功信息
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `🚀 **Release created successfully!**\\n\\n` +
+                      `📦 **Version**: ${tagName}\\n` +
+                      `🔗 **Release URL**: ${release.html_url}\\n\\n` +
+                      `The release has been published with the changelog from the comment above.`
+              });
+              
+              return {
+                release_url: release.html_url,
+                tag_name: tagName
+              };
+              
+            } catch (error) {
+              console.error('Failed to create release:', error);
+              
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `❌ **Release failed**: ${error.message}\\n\\nPlease check the workflow logs for more details.`
+              });
+              
+              throw error;
+            }
