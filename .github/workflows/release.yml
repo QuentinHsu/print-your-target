@@ -153,7 +153,7 @@ jobs:
 
             // 写入文件供后续步骤使用
             const fs = require('fs');
-            fs.writeFileSync('changelog.md', changelog.trim());
+            fs.writeFileSync('temp-release-changelog.md', changelog.trim());
 
             return { changelog: changelog.trim() };
 
@@ -196,7 +196,7 @@ jobs:
 
             // 读取 changelog
             const fs = require('fs');
-            const changelog = fs.readFileSync('changelog.md', 'utf8');
+            const changelog = fs.readFileSync('temp-release-changelog.md', 'utf8');
 
             try {
               const { data: release } = await github.rest.repos.createRelease({
