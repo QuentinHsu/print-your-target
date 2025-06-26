@@ -1,0 +1,95 @@
+name: Bug Report / Bug 报告
+description: Report a bug / 报告一个 Bug
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Thank you for reporting a bug! / 感谢您报告 Bug！
+        
+        Please describe the issue in detail to help us fix it faster.
+        请详细描述问题，这将帮助我们更快地修复它。
+
+  - type: textarea
+    id: bug-description
+    attributes:
+      label: Bug Description / Bug 描述
+      description: A clear and concise description of what the bug is / 清晰简洁地描述这个 Bug
+      placeholder: |
+        Describe what happened...
+        描述发生了什么...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce-steps
+    attributes:
+      label: Steps to Reproduce / 重现步骤
+      description: Steps to reproduce the behavior / 描述如何重现这个问题
+      placeholder: |
+        1. Go to '...'
+        2. Click on '...'
+        3. Scroll down to '...'
+        4. See error
+        
+        1. 打开 '...'
+        2. 点击 '...'
+        3. 滚动到 '...'
+        4. 看到错误
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected Behavior / 期望行为
+      description: A clear and concise description of what you expected to happen / 描述您期望发生什么
+      placeholder: |
+        What should happen...
+        应该发生什么...
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots / 截图
+      description: If applicable, add screenshots to help explain your problem / 如果适用，请添加截图来说明问题
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System / 操作系统
+      description: What operating system are you using? / 您使用的操作系统
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Other / 其他
+    validations:
+      required: true
+
+  - type: input
+    id: vscode-version
+    attributes:
+      label: VS Code Version / VS Code 版本
+      description: What version of VS Code are you using? / 您使用的 VS Code 版本
+      placeholder: "e.g.: 1.84.2 / 例如: 1.84.2"
+    validations:
+      required: true
+
+  - type: input
+    id: extension-version
+    attributes:
+      label: Extension Version / 扩展版本
+      description: What version of Copy Your Click extension are you using? / Copy Your Click 扩展的版本
+      placeholder: "e.g.: 0.0.3 / 例如: 0.0.3"
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context / 其他信息
+      description: Add any other context about the problem here / 添加任何其他有关问题的信息

@@ -1,0 +1,25 @@
+# Global owners
+# 全局所有者
+# * @admin-username
+
+# Package.json requires admin review for version changes
+# package.json 版本变更需要管理员审核
+package.json @QuentinHsu
+
+# CHANGELOG.md requires admin review
+# CHANGELOG.md 需要管理员审核  
+CHANGELOG.md @QuentinHsu
+
+# GitHub workflows require admin review
+# GitHub 工作流需要管理员审核
+.github/workflows/ @QuentinHsu
+
+# Release and version related files
+# 发布和版本相关文件
+*.vsix @QuentinHsu
+
+# Configuration files that affect build/release
+# 影响构建/发布的配置文件
+tsconfig.json @QuentinHsu
+
+* @QuentinHsu

@@ -1,0 +1,194 @@
+name: PR Merge Gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+  workflow_run:
+    workflows: ["PR Changelog Update"]
+    types: [completed]
+
+jobs:
+  merge-gate:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request')
+    
+    steps:
+      - name: Get PR information
+        id: pr-info
+        uses: actions/github-script@v7
+        with:
+          script: |
+            let prNumber, prRef;
+            if (context.eventName === 'pull_request') {
+              prNumber = context.payload.pull_request.number;
+              prRef = context.payload.pull_request.head.sha;
+            } else if (context.eventName === 'workflow_run') {
+              const pulls = await github.rest.pulls.list({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                head: `${context.repo.owner}:${context.payload.workflow_run.head_branch}`,
+                state: 'open'
+              });
+              if (pulls.data.length > 0) {
+                prNumber = pulls.data[0].number;
+                prRef = pulls.data[0].head.sha;
+              } else {
+                console.log('No open PR found for this branch');
+                return;
+              }
+            }
+            core.setOutput('pr-number', prNumber);
+            core.setOutput('pr-ref', prRef);
+            console.log(`Processing PR #${prNumber} with ref ${prRef}`);
+
+      - name: Check version change requirements
+        id: version-check
+        if: steps.pr-info.outputs.pr-number
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.pr-info.outputs.pr-number }}
+        with:
+          script: |
+            const prNumber = process.env.PR_NUMBER;
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+            const packageJsonChanged = files.some(file => file.filename === 'package.json');
+            if (!packageJsonChanged) {
+              console.log('✅ No package.json changes detected - merge allowed');
+              core.setOutput('requires-changelog', 'false');
+              core.setOutput('status', 'success');
+              core.setOutput('description', 'No version change detected');
+              return;
+            }
+            try {
+              const { data: mainPackage } = await github.rest.repos.getContent({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                path: 'package.json',
+                ref: 'main'
+              });
+              const { data: prPackage } = await github.rest.repos.getContent({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                path: 'package.json',
+                ref: pr.head.sha
+              });
+              const mainVersion = JSON.parse(Buffer.from(mainPackage.content, 'base64').toString()).version;
+              const prVersion = JSON.parse(Buffer.from(prPackage.content, 'base64').toString()).version;
+              if (mainVersion === prVersion) {
+                console.log('✅ Package.json changed but version is the same - merge allowed');
+                core.setOutput('requires-changelog', 'false');
+                core.setOutput('status', 'success');
+                core.setOutput('description', 'Package.json changed but version unchanged');
+                return;
+              }
+              console.log(`🔍 Version change detected: ${mainVersion} → ${prVersion}`);
+              core.setOutput('requires-changelog', 'true');
+              core.setOutput('old-version', mainVersion);
+              core.setOutput('new-version', prVersion);
+            } catch (error) {
+              console.log('❌ Error checking package.json versions:', error.message);
+              core.setOutput('requires-changelog', 'true');
+            }
+
+      - name: Check changelog workflow completion
+        id: changelog-check
+        if: steps.version-check.outputs.requires-changelog == 'true'
+        uses: actions/github-script@v7
+        env:
+          PR_REF: ${{ steps.pr-info.outputs.pr-ref }}
+        with:
+          script: |
+            const prRef = process.env.PR_REF;
+            // 先通过 workflow 文件名找
+            let workflowId = 'pr-changelog.yml';
+            let workflowRuns = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: workflowId,
+              head_sha: prRef,
+              per_page: 10
+            });
+            // 若未找到，再尝试通过工作流名找
+            if (workflowRuns.data.total_count === 0) {
+              workflowId = 'PR Changelog Update';
+              workflowRuns = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: workflowId,
+                head_sha: prRef,
+                per_page: 10
+              });
+            }
+            console.log(`Found ${workflowRuns.data.total_count} workflow runs for commit ${prRef}`);
+            if (workflowRuns.data.total_count === 0) {
+              console.log(`❌ No changelog workflow runs found for commit ${prRef}. Please ensure the "PR Changelog Update" workflow is triggered.`);
+              core.setOutput('status', 'failure');
+              core.setOutput('description', 'Changelog workflow has not run for this commit');
+              return;
+            }
+            const completedRuns = workflowRuns.data.workflow_runs.filter(run =>
+              run.status === 'completed' &&
+              ['pull_request', 'workflow_dispatch', 'issue_comment'].includes(run.event)
+            );
+            if (completedRuns.length === 0) {
+              console.log('❌ No completed changelog workflow runs found');
+              core.setOutput('status', 'pending');
+              core.setOutput('description', 'Waiting for changelog workflow to complete');
+              return;
+            }
+            const latestRun = completedRuns[0];
+            if (latestRun.conclusion === 'success') {
+              console.log('✅ Changelog workflow completed successfully');
+              core.setOutput('status', 'success');
+              core.setOutput('description', 'Version change detected and changelog updated successfully');
+            } else {
+              console.log(`❌ Changelog workflow failed with conclusion: ${latestRun.conclusion}`);
+              core.setOutput('status', 'failure');
+              core.setOutput('description', `Changelog workflow ${latestRun.conclusion}. Please fix and retry.`);
+            }
+
+      - name: Set final status
+        if: always() && steps.pr-info.outputs.pr-number
+        uses: actions/github-script@v7
+        env:
+          PR_REF: ${{ steps.pr-info.outputs.pr-ref }}
+          REQUIRES_CHANGELOG: ${{ steps.version-check.outputs.requires-changelog || 'false' }}
+          VERSION_STATUS: ${{ steps.version-check.outputs.status || 'success' }}
+          VERSION_DESCRIPTION: ${{ steps.version-check.outputs.description || 'No version change' }}
+          CHANGELOG_STATUS: ${{ steps.changelog-check.outputs.status || 'success' }}
+          CHANGELOG_DESCRIPTION: ${{ steps.changelog-check.outputs.description || 'Changelog check not required' }}
+        with:
+          script: |
+            const prRef = process.env.PR_REF;
+            const requiresChangelog = process.env.REQUIRES_CHANGELOG === 'true';
+            let finalStatus, finalDescription;
+            if (!requiresChangelog) {
+              finalStatus = process.env.VERSION_STATUS;
+              finalDescription = process.env.VERSION_DESCRIPTION;
+            } else {
+              finalStatus = process.env.CHANGELOG_STATUS;
+              finalDescription = process.env.CHANGELOG_DESCRIPTION;
+            }
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: prRef,
+              state: finalStatus,
+              context: 'pr-merge-gate',
+              description: finalDescription,
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+            console.log(`✅ Set commit status: ${finalStatus} - ${finalDescription}`);
+            if (finalStatus === 'failure') {
+              core.setFailed(finalDescription);
+            }

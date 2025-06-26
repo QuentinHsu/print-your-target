@@ -1,0 +1,613 @@
+name: PR Changelog Update
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to update changelog for'
+        required: true
+        type: number
+  issue_comment:
+    types: [created]
+
+jobs:
+  check-comment:
+    if: github.event_name == 'issue_comment'
+    runs-on: ubuntu-latest
+    outputs:
+      should-run: ${{ steps.check.outputs.should-run }}
+      pr-number: ${{ steps.check.outputs.pr-number }}
+    
+    steps:
+      - name: Check comment trigger
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const comment = context.payload.comment;
+            const issue = context.payload.issue;
+            
+            // 检查是否是 PR 的评论
+            if (!issue.pull_request) {
+              console.log('Comment is not on a PR');
+              core.setOutput('should-run', 'false');
+              return;
+            }
+            
+            // 检查评论内容是否包含触发指令
+            const commentBody = comment.body.toLowerCase().trim();
+            const triggerCommands = [
+              '/update-changelog',
+              '/重新生成changelog',
+              '/regenerate-changelog',
+              '/update changelog',
+              '/更新changelog'
+            ];
+            
+            const shouldRun = triggerCommands.some(cmd => 
+              commentBody.includes(cmd) || commentBody.startsWith(cmd)
+            );
+            
+            if (shouldRun) {
+              console.log('Trigger command found in comment');
+              core.setOutput('should-run', 'true');
+              core.setOutput('pr-number', issue.number);
+              
+              // 添加反应表情表示已收到指令
+              await github.rest.reactions.createForIssueComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: comment.id,
+                content: '+1'
+              });
+            } else {
+              console.log('No trigger command found in comment');
+              core.setOutput('should-run', 'false');
+            }
+
+  update-changelog:
+    runs-on: ubuntu-latest
+    if: |
+      always() && (
+        github.event_name == 'pull_request' || 
+        github.event_name == 'workflow_dispatch' || 
+        (github.event_name == 'issue_comment' && needs.check-comment.outputs.should-run == 'true')
+      )
+    needs: 
+      - check-comment
+    outputs:
+      version-changed: ${{ steps.version-check.outputs.version-changed }}
+      changelog-updated: ${{ steps.changelog-status.outputs.updated }}
+      pr-number: ${{ steps.pr-info.outputs.pr-number }}
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: |
+            ${{ 
+              github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/head', inputs.pr_number) || 
+              github.event_name == 'issue_comment' && format('refs/pull/{0}/head', needs.check-comment.outputs.pr-number) ||
+              github.head_ref 
+            }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get PR information
+        id: pr-info
+        uses: actions/github-script@v7
+        with:
+          script: |
+            let prNumber, prBody, headRef;
+            if (context.eventName === 'workflow_dispatch') {
+              prNumber = inputs.pr_number;
+              const { data: pr } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber
+              });
+              prBody = pr.body || '';
+              headRef = pr.head.ref;
+            } else if (context.eventName === 'issue_comment') {
+              prNumber = '${{ needs.check-comment.outputs.pr-number }}';
+              const { data: pr } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber
+              });
+              prBody = pr.body || '';
+              headRef = pr.head.ref;
+            } else {
+              prNumber = context.payload.pull_request.number;
+              prBody = context.payload.pull_request.body || '';
+              headRef = context.payload.pull_request.head.ref;
+            }
+            core.setOutput('pr-number', prNumber);
+            core.setOutput('pr-body', prBody);
+            core.setOutput('head-ref', headRef);
+
+      - name: Check if package.json version changed
+        id: version-check
+        run: |
+          if [ -f package.json ]; then
+            CURRENT_VERSION=$(jq -r .version package.json)
+          else
+            echo "package.json not found"
+            exit 0
+          fi
+
+          git fetch origin main:main
+          git show main:package.json > main_package.json 2>/dev/null || echo '{"version": "0.0.0"}' > main_package.json
+          MAIN_VERSION=$(jq -r .version main_package.json)
+
+          echo "Main branch version: $MAIN_VERSION"
+          echo "Current branch version: $CURRENT_VERSION"
+
+          if [ "$CURRENT_VERSION" != "$MAIN_VERSION" ]; then
+            echo "Version changed from $MAIN_VERSION to $CURRENT_VERSION"
+            echo "version-changed=true" >> $GITHUB_OUTPUT
+            echo "new-version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+            echo "previous-version=$MAIN_VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "Version not changed, skipping changelog update"
+            echo "version-changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Extract changelog from PR description
+        id: extract-changelog
+        if: steps.version-check.outputs.version-changed == 'true'
+        uses: actions/github-script@v7
+        env:
+          PR_BODY: ${{ steps.pr-info.outputs.pr-body }}
+          PR_NUMBER: ${{ steps.pr-info.outputs.pr-number }}
+          NEW_VERSION: ${{ steps.version-check.outputs.new-version }}
+        with:
+          script: |
+            const prBody = process.env.PR_BODY || '';
+            const prNumber = process.env.PR_NUMBER || '';
+            const newVersion = process.env.NEW_VERSION || '';
+
+            console.log('Original PR Body:', prBody);
+
+            // 首先移除所有 HTML 注释（包括多行注释）
+            let cleanedPrBody = prBody.replace(/<!--[\s\S]*?-->/g, '').trim();
+            console.log('PR Body after removing HTML comments:', cleanedPrBody);
+
+            const changelogRegex = /(?:^|\n)##\s*(?:Changelog|更新日志|CHANGELOG)\s*\n([\s\S]*?)(?=\n##|\n---|\n```|$)/i;
+            const match = cleanedPrBody.match(changelogRegex);
+
+            let changelog = '';
+            if (match && match[1]) {
+              changelog = match[1].trim();
+              console.log('Extracted changelog from ## section:', changelog);
+            }
+
+            if (!changelog && cleanedPrBody.trim()) {
+              const changelogKeywords = ['Feature', 'Fixed', 'Changed', 'Added', 'Removed', 'feat', 'fix', 'add', 'update', 'remove', '新增', '修复', '更新', '删除', '功能', '变更'];
+              const hasChangelogKeywords = changelogKeywords.some(keyword => 
+                cleanedPrBody.toLowerCase().includes(keyword.toLowerCase())
+              );
+
+              if (hasChangelogKeywords) {
+                const featureMatch = cleanedPrBody.match(/###\s*(?:Feature|Added|Fixed|Changed|Removed|新增|修复|更新|变更|功能)[\s\S]*$/i);
+                if (featureMatch) {
+                  changelog = featureMatch[0].trim();
+                  console.log('Extracted changelog from ### section:', changelog);
+                }
+              }
+            }
+
+            // 如果提取的 changelog 为空或只包含空白字符，则跳过
+            if (!changelog || changelog.trim() === '') {
+              console.log('No valid changelog content found, using fallback');
+            }
+
+            // 检查提取的内容是否只是注释模板
+            if (changelog && changelog.trim() !== '') {
+              // 检查是否包含模板关键词，如果是模板则跳过
+              const templateKeywords = [
+                'If this PR requires a new version',
+                '如果这个 PR 需要发布新版本',
+                'please write the changelog below',
+                '请在下面写明更新日志',
+                'Suggested format',
+                '格式建议'
+              ];
+              
+              const isTemplate = templateKeywords.some(keyword => 
+                changelog.toLowerCase().includes(keyword.toLowerCase())
+              );
+              
+              if (isTemplate) {
+                console.log('Detected template content, treating as empty');
+                changelog = '';
+              }
+            }
+
+            // 只有在确实没有找到任何有效内容时才使用 fallback
+            if (!changelog || changelog.trim() === '') {
+              changelog = `### Changed / 变更
+            - Release v${newVersion}
+            - 发布 v${newVersion} 版本
+
+            Changes merged from PR #${prNumber}
+            合并来自 PR #${prNumber} 的更改`;
+              console.log('Using fallback changelog content');
+            }
+
+            console.log('Final extracted changelog:', changelog);
+
+            const fs = require('fs');
+            fs.writeFileSync('extracted-changelog.txt', changelog);
+
+            return { changelog: changelog };
+
+      - name: Update CHANGELOG.md
+        if: steps.version-check.outputs.version-changed == 'true'
+        run: |
+          NEW_VERSION="${{ steps.version-check.outputs.new-version }}"
+          CHANGELOG_CONTENT=$(cat extracted-changelog.txt)
+          CURRENT_DATE=$(date +"%Y-%m-%d")
+
+          cat > new_changelog_entry.md << EOF
+          ## [$NEW_VERSION] - $CURRENT_DATE
+
+          $CHANGELOG_CONTENT
+
+          EOF
+
+          # 检查是否是指令触发的重新生成
+          IS_COMMAND_TRIGGER="${{ github.event_name == 'issue_comment' }}"
+
+          # 总是从 main 分支获取完整的 CHANGELOG.md 作为基础，确保不丢失历史版本
+          echo "Getting complete CHANGELOG.md from main branch as baseline..."
+          git show main:CHANGELOG.md > main_changelog.md 2>/dev/null || echo -e "# Change Log\n\n" > main_changelog.md
+
+          # 检查 main 分支的 CHANGELOG.md 是否已经包含当前版本
+          if grep -q "^## \[$NEW_VERSION\]" main_changelog.md; then
+            echo "Version $NEW_VERSION already exists in main branch CHANGELOG.md"
+            if [ "$IS_COMMAND_TRIGGER" = "true" ]; then
+              echo "Command-triggered: Will update existing entry for version $NEW_VERSION"
+              # 需要替换现有版本条目，使用 main 分支作为基础
+              cp main_changelog.md CHANGELOG.md
+              
+              # 现在替换当前版本的条目
+              VERSION_START=$(grep -n "^## \[$NEW_VERSION\]" CHANGELOG.md | cut -d: -f1)
+              if [ -n "$VERSION_START" ]; then
+                NEXT_VERSION=$(tail -n +$((VERSION_START + 1)) CHANGELOG.md | grep -n "^## \[" | head -1 | cut -d: -f1)
+                
+                if [ -n "$NEXT_VERSION" ]; then
+                  VERSION_END=$((VERSION_START + NEXT_VERSION - 1))
+                  sed -i.tmp "${VERSION_START},${VERSION_END}d" CHANGELOG.md
+                else
+                  sed -i.tmp "${VERSION_START},\$d" CHANGELOG.md
+                fi
+                rm -f CHANGELOG.md.tmp
+              fi
+              
+              # 添加新的条目
+              head -n 3 CHANGELOG.md > temp_changelog.md 2>/dev/null || echo -e "# Change Log\n\n" > temp_changelog.md
+              cat new_changelog_entry.md >> temp_changelog.md
+              tail -n +4 CHANGELOG.md >> temp_changelog.md 2>/dev/null || true
+              mv temp_changelog.md CHANGELOG.md
+            else
+              echo "Using main branch CHANGELOG.md as-is (no regeneration requested)"
+              cp main_changelog.md CHANGELOG.md
+            fi
+          else
+            echo "Adding new entry for version $NEW_VERSION to main branch changelog"
+            # 使用 main 分支的 changelog 作为基础，添加新版本条目
+            head -n 3 main_changelog.md > temp_changelog.md 2>/dev/null || echo -e "# Change Log\n\n" > temp_changelog.md
+            cat new_changelog_entry.md >> temp_changelog.md
+            tail -n +4 main_changelog.md >> temp_changelog.md 2>/dev/null || true
+            mv temp_changelog.md CHANGELOG.md
+          fi
+
+          # 清理临时文件
+          rm -f main_changelog.md new_changelog_entry.md extracted-changelog.txt
+
+      - name: Commit CHANGELOG.md update
+        if: steps.version-check.outputs.version-changed == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+          git add CHANGELOG.md
+
+          NEW_VERSION="${{ steps.version-check.outputs.new-version }}"
+          IS_COMMAND_TRIGGER="${{ github.event_name == 'issue_comment' }}"
+          HEAD_REF="${{ steps.pr-info.outputs.head-ref }}"
+
+          if git diff --staged --quiet; then
+            if [ "$IS_COMMAND_TRIGGER" = "true" ]; then
+              echo "Command-triggered: Force updating changelog commit even without file changes"
+              # 检查是否存在现有的 changelog commit
+              if git log --oneline -10 | grep -q "docs: update CHANGELOG.md for v$NEW_VERSION"; then
+                echo "Amending existing changelog commit with regenerated content"
+                git commit --allow-empty --amend -m "docs: update CHANGELOG.md for v$NEW_VERSION (regenerated)"
+                git push --force-with-lease origin HEAD:$HEAD_REF
+              else
+                echo "Creating new changelog commit (forced)"
+                git commit --allow-empty -m "docs: update CHANGELOG.md for v$NEW_VERSION (regenerated)"
+                git push origin HEAD:$HEAD_REF
+              fi
+            else
+              echo "No changes to CHANGELOG.md to commit"
+            fi
+          else
+            if git log --oneline -10 | grep -q "docs: update CHANGELOG.md for v$NEW_VERSION"; then
+              if [ "$IS_COMMAND_TRIGGER" = "true" ]; then
+                echo "Command-triggered: Amending existing changelog commit with updated content"
+                git commit --amend -m "docs: update CHANGELOG.md for v$NEW_VERSION (regenerated)"
+              else
+                echo "Amending existing changelog commit"
+                git commit --amend -m "docs: update CHANGELOG.md for v$NEW_VERSION"
+              fi
+              git push --force-with-lease origin HEAD:$HEAD_REF
+            else
+              if [ "$IS_COMMAND_TRIGGER" = "true" ]; then
+                echo "Command-triggered: Creating new changelog commit"
+                git commit -m "docs: update CHANGELOG.md for v$NEW_VERSION (regenerated)"
+              else
+                echo "Creating new changelog commit"
+                git commit -m "docs: update CHANGELOG.md for v$NEW_VERSION"
+              fi
+              git push origin HEAD:$HEAD_REF
+            fi
+          fi
+
+      - name: Set changelog status
+        id: changelog-status
+        if: always()
+        run: |
+          if [ "${{ steps.version-check.outputs.version-changed }}" == "true" ]; then
+            if [ -f CHANGELOG.md ]; then
+              echo "updated=true" >> $GITHUB_OUTPUT
+              echo "Changelog was updated successfully"
+            else
+              echo "updated=false" >> $GITHUB_OUTPUT
+              echo "Changelog update failed - file not found"
+              exit 1
+            fi
+          else
+            echo "updated=false" >> $GITHUB_OUTPUT
+            echo "No version change - changelog update not required"
+          fi
+
+      - name: Add comment to PR
+        if: steps.version-check.outputs.version-changed == 'true'
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.pr-info.outputs.pr-number }}
+          NEW_VERSION: ${{ steps.version-check.outputs.new-version }}
+          PREVIOUS_VERSION: ${{ steps.version-check.outputs.previous-version }}
+        with:
+          script: |
+            const prNumber = process.env.PR_NUMBER;
+            const newVersion = process.env.NEW_VERSION;
+            const previousVersion = process.env.PREVIOUS_VERSION;
+
+            const commentBody = `## 🚀 Version Update Detected
+
+            **Version changed:** \`${previousVersion}\` → \`${newVersion}\`
+
+            ✅ CHANGELOG.md has been automatically updated with the changelog content from this PR.
+
+            **⚠️ Admin Review Required**
+            This PR requires admin approval before merging as it contains a version update.
+
+            **🔄 Need to regenerate changelog?**
+            You can trigger changelog regeneration in the following ways:
+            1. Edit the PR description and manually trigger the "Update PR Changelog" workflow
+            2. Comment with one of these commands (will force regenerate and recommit):
+               - \`/update-changelog\`
+               - \`/regenerate-changelog\`
+               - \`/重新生成changelog\`
+
+            ---
+
+            ## 🚀 检测到版本更新
+
+            **版本变更：** \`${previousVersion}\` → \`${newVersion}\`
+
+            ✅ CHANGELOG.md 已自动使用此 PR 中的更新日志内容进行更新。
+
+            **⚠️ 需要管理员审核**
+            此 PR 包含版本更新，需要管理员批准后才能合并。
+
+            **🔄 需要重新生成更新日志？**
+            您可以通过以下方式触发更新日志重新生成：
+            1. 编辑 PR 描述，然后手动触发 "Update PR Changelog" 工作流
+            2. 使用以下任一指令进行评论（将强制重新生成并重新提交）：
+               - \`/update-changelog\`
+               - \`/regenerate-changelog\`
+               - \`/重新生成changelog\``;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: commentBody
+            });
+
+      - name: Request review from admins
+        if: steps.version-check.outputs.version-changed == 'true'
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.pr-info.outputs.pr-number }}
+        with:
+          script: |
+            const prNumber = process.env.PR_NUMBER;
+
+            try {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                labels: ['version-update', 'needs-admin-review']
+              });
+            } catch (error) {
+              console.log('Could not add labels (labels may not exist):', error.message);
+            }
+
+            try {
+              await github.rest.pulls.requestReviewers({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                reviewers: [], // 填入管理员用户名
+                team_reviewers: []
+              });
+            } catch (error) {
+              console.log('Could not request reviewers:', error.message);
+            }
+
+      - name: Comment success feedback
+        if: github.event_name == 'issue_comment' && steps.version-check.outputs.version-changed == 'true'
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.pr-info.outputs.pr-number }}
+          NEW_VERSION: ${{ steps.version-check.outputs.new-version }}
+        with:
+          script: |
+            const prNumber = process.env.PR_NUMBER;
+            const newVersion = process.env.NEW_VERSION;
+
+            const successComment = `## ✅ Changelog Update Completed
+
+            **Command executed successfully!** 🎉
+
+            The changelog has been regenerated for version \`${newVersion}\` based on the current PR description.
+
+            **📝 Changes made:**
+            - Updated CHANGELOG.md with the latest content from PR description
+            - Committed changes with message: "docs: update CHANGELOG.md for v${newVersion} (regenerated)"
+            - Forced update even if content was unchanged
+
+            ---
+
+            ## ✅ 更新日志更新完成
+
+            **指令执行成功！** 🎉
+
+            已基于当前 PR 描述为版本 \`${newVersion}\` 重新生成更新日志。
+
+            **📝 所做更改：**
+            - 使用 PR 描述中的最新内容更新了 CHANGELOG.md
+            - 提交更改，消息为："docs: update CHANGELOG.md for v${newVersion} (regenerated)"
+            - 即使内容未更改也强制更新了提交`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: successComment
+            });
+
+      - name: Comment no version change feedback
+        if: github.event_name == 'issue_comment' && steps.version-check.outputs.version-changed == 'false'
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.pr-info.outputs.pr-number }}
+        with:
+          script: |
+            const prNumber = process.env.PR_NUMBER;
+
+            const noChangeComment = `## ℹ️ No Version Change Detected
+
+            **Command received**, but no version change was detected in this PR.
+
+            The changelog update workflow only runs when the version in \`package.json\` has changed compared to the main branch.
+
+            ---
+
+            ## ℹ️ 未检测到版本变更
+
+            **已收到指令**，但在此 PR 中未检测到版本变更。
+
+            更新日志更新工作流仅在 \`package.json\` 中的版本相对于主分支发生变更时运行。`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: noChangeComment
+            });
+
+  # 状态检查 - 用于反馈 changelog 更新结果
+  changelog-status:
+    runs-on: ubuntu-latest
+    if: |
+      always() && (
+        github.event_name == 'pull_request' || 
+        (github.event_name == 'issue_comment' && needs.check-comment.outputs.should-run == 'true')
+      )
+    needs: 
+      - check-comment
+      - update-changelog
+    
+    steps:
+      - name: Report changelog update status
+        uses: actions/github-script@v7
+        env:
+          VERSION_CHANGED: ${{ needs.update-changelog.outputs.version-changed || 'false' }}
+          CHANGELOG_UPDATED: ${{ needs.update-changelog.outputs.changelog-updated || 'false' }}
+          UPDATE_JOB_RESULT: ${{ needs.update-changelog.result }}
+          PR_NUMBER: ${{ needs.update-changelog.outputs.pr-number }}
+        with:
+          script: |
+            const versionChanged = process.env.VERSION_CHANGED === 'true';
+            const changelogUpdated = process.env.CHANGELOG_UPDATED === 'true';
+            const updateJobResult = process.env.UPDATE_JOB_RESULT;
+            const prNumber = process.env.PR_NUMBER;
+            
+            console.log('Changelog update summary:');
+            console.log('- Version changed:', versionChanged);
+            console.log('- Changelog updated:', changelogUpdated);
+            console.log('- Update job result:', updateJobResult);
+            
+            let status = 'success';
+            let description = 'Changelog workflow completed';
+            
+            if (versionChanged) {
+              if (updateJobResult === 'success' && changelogUpdated) {
+                status = 'success';
+                description = 'Version updated and changelog generated successfully';
+              } else {
+                status = 'failure';
+                description = 'Version changed but changelog update failed';
+              }
+            } else {
+              if (updateJobResult === 'success') {
+                status = 'success';
+                description = 'No version change detected - no action required';
+              } else {
+                status = 'failure';
+                description = 'Changelog workflow encountered errors';
+              }
+            }
+            
+            // 获取 PR 的 commit SHA
+            if (prNumber && github.event_name === 'pull_request') {
+              const prRef = context.payload.pull_request.head.sha;
+              
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha: prRef,
+                state: status,
+                context: 'changelog-update',
+                description: description,
+                target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+              });
+              
+              console.log(`Set commit status: ${status} - ${description}`);
+            }
+            
+            // 如果是关键性失败，让 job 失败
+            if (versionChanged && (updateJobResult !== 'success' || !changelogUpdated)) {
+              core.setFailed('Version was changed but changelog was not properly updated. This will block PR merging.');
+            }

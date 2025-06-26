@@ -1,108 +1,217 @@
 name: Release
 
 on:
-  workflow_dispatch:
+  pull_request:
+    types: [closed]
+    branches: [main]
 
 jobs:
-  build:
+  check-version-and-release:
+    # 只有当 PR 被合并到 main 分支时才运行
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # 获取所有历史记录，以便查找上一个 tag
+          fetch-depth: 2 # 获取前两个提交以比较差异
+
+      - name: Check if package.json version changed
+        id: version-check
+        run: |
+          # 获取当前的 package.json 版本
+          CURRENT_VERSION=$(jq -r .version package.json)
+          
+          # 获取上一个提交的 package.json 版本
+          git checkout HEAD~1 -- package.json
+          PREVIOUS_VERSION=$(jq -r .version package.json)
+          
+          # 恢复当前的 package.json
+          git checkout HEAD -- package.json
+          
+          echo "Previous version: $PREVIOUS_VERSION"
+          echo "Current version: $CURRENT_VERSION"
+          
+          # 检查版本是否发生变化
+          if [ "$CURRENT_VERSION" != "$PREVIOUS_VERSION" ]; then
+            echo "Version changed from $PREVIOUS_VERSION to $CURRENT_VERSION"
+            echo "version-changed=true" >> $GITHUB_OUTPUT
+            echo "new-version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "Version not changed, skipping release"
+            echo "version-changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Extract changelog from CHANGELOG.md
+        id: extract-changelog
+        if: steps.version-check.outputs.version-changed == 'true'
+        run: |
+          NEW_VERSION="${{ steps.version-check.outputs.new-version }}"
+          echo "Extracting changelog for version $NEW_VERSION from CHANGELOG.md"
+          
+          if [ -f CHANGELOG.md ]; then
+            # 查找当前版本的 changelog 条目
+            VERSION_START=$(grep -n "^## \[$NEW_VERSION\]" CHANGELOG.md | cut -d: -f1)
+            
+            if [ -n "$VERSION_START" ]; then
+              echo "Found changelog entry for version $NEW_VERSION at line $VERSION_START"
+              
+              # 查找下一个版本的开始位置
+              NEXT_VERSION_LINE=$(tail -n +$((VERSION_START + 1)) CHANGELOG.md | grep -n "^## " | head -1 | cut -d: -f1)
+              
+              if [ -n "$NEXT_VERSION_LINE" ]; then
+                # 有下一个版本，提取到下一个版本之前
+                VERSION_END=$((VERSION_START + NEXT_VERSION_LINE - 1))
+                sed -n "${VERSION_START},${VERSION_END}p" CHANGELOG.md | tail -n +2 | head -n -1 > temp_changelog.txt
+              else
+                # 没有下一个版本，提取到文件末尾
+                sed -n "${VERSION_START},\$p" CHANGELOG.md | tail -n +2 > temp_changelog.txt
+              fi
+              
+              # 移除空行和日期行，只保留实际的 changelog 内容
+              sed '/^$/d; /^## \[.*\] - [0-9]/d' temp_changelog.txt > release-changelog.txt
+              
+              echo "Extracted changelog content:"
+              cat release-changelog.txt
+            else
+              echo "Warning: No changelog entry found for version $NEW_VERSION in CHANGELOG.md"
+              echo "Falling back to default release notes"
+              
+              # 从 PR 描述作为后备方案
+              PR_NUMBER="${{ github.event.pull_request.number }}"
+              cat > release-changelog.txt << EOF
+          ### Changed / 变更
+          - Release v${NEW_VERSION}
+          - 发布 v${NEW_VERSION} 版本
+          
+          Changes merged from PR #${PR_NUMBER}
+          合并来自 PR #${PR_NUMBER} 的更改
+          EOF
+            fi
+            
+            # 清理临时文件
+            rm -f temp_changelog.txt
+          else
+            echo "CHANGELOG.md not found, using default release notes"
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+            cat > release-changelog.txt << EOF
+          ### Changed / 变更
+          - Release v${NEW_VERSION}
+          - 发布 v${NEW_VERSION} 版本
+          
+          Changes merged from PR #${PR_NUMBER}
+          合并来自 PR #${PR_NUMBER} 的更改
+          EOF
+          fi
+
+      - name: Update CHANGELOG.md in main branch
+        if: steps.version-check.outputs.version-changed == 'true'
+        run: |
+          NEW_VERSION="${{ steps.version-check.outputs.new-version }}"
+          
+          # 检查 CHANGELOG.md 是否已包含新版本
+          if ! grep -q "^## \[$NEW_VERSION\]" CHANGELOG.md; then
+            echo "CHANGELOG.md does not contain version $NEW_VERSION, updating it"
+            
+            # 从 release-changelog.txt 读取内容
+            if [ -f release-changelog.txt ]; then
+              CHANGELOG_CONTENT=$(cat release-changelog.txt)
+              CURRENT_DATE=$(date +"%Y-%m-%d")
+              
+              # 创建新的版本条目
+              TEMP_ENTRY=$(mktemp)
+              cat > "$TEMP_ENTRY" << EOF
+          ## [$NEW_VERSION] - $CURRENT_DATE
+
+          $CHANGELOG_CONTENT
+
+          EOF
+              
+              # 将新条目插入到 CHANGELOG.md 的开头（在标题之后）
+              if [ -f CHANGELOG.md ]; then
+                {
+                  head -n 3 CHANGELOG.md 2>/dev/null || echo -e "# Change Log\n\n"
+                  cat "$TEMP_ENTRY"
+                  tail -n +4 CHANGELOG.md 2>/dev/null || true
+                } > CHANGELOG_temp.md
+                mv CHANGELOG_temp.md CHANGELOG.md
+              else
+                {
+                  echo "# Change Log"
+                  echo ""
+                  echo ""
+                  cat "$TEMP_ENTRY"
+                } > CHANGELOG.md
+              fi
+              
+              # 提交更新的 CHANGELOG.md
+              git config --local user.email "action@github.com"
+              git config --local user.name "GitHub Action"
+              git add CHANGELOG.md
+              
+              if ! git diff --staged --quiet; then
+                git commit -m "docs: update CHANGELOG.md for v$NEW_VERSION (release)"
+                git push origin main
+                echo "CHANGELOG.md updated and committed to main branch"
+              else
+                echo "No changes to CHANGELOG.md needed"
+              fi
+              
+              rm -f "$TEMP_ENTRY"
+            else
+              echo "No release-changelog.txt found, skipping CHANGELOG.md update"
+            fi
+          else
+            echo "CHANGELOG.md already contains version $NEW_VERSION"
+          fi
 
       - name: Set up Node.js
-        uses: actions/setup-node@v3
+        if: steps.version-check.outputs.version-changed == 'true'
+        uses: actions/setup-node@v4
         with:
           node-version: '18' # 升级到 Node.js 18
 
       - name: Enable Corepack
+        if: steps.version-check.outputs.version-changed == 'true'
         run: corepack enable
 
       - name: Install pnpm
+        if: steps.version-check.outputs.version-changed == 'true'
         run: corepack prepare pnpm@latest --activate
 
       - name: Install vsce
+        if: steps.version-check.outputs.version-changed == 'true'
         run: npm add -g vsce
 
       - name: Install dependencies
+        if: steps.version-check.outputs.version-changed == 'true'
         run: pnpm install
 
-      - name: Get version from package.json
-        id: get_version
-        run: echo "VERSION=$(jq -r .version package.json)" >> $GITHUB_ENV
-
-      - name: Get previous tag
-        id: get_previous_tag
-        run: echo "tag=$(git describe --tags --abbrev=0 HEAD^)" >> $GITHUB_OUTPUT
-
-      - name: Build Changelog
-        id: build_changelog
-        uses: mikepenz/release-changelog-builder-action@v5
-        with:
-          mode: "COMMIT"
-          fromTag: ${{ steps.get_previous_tag.outputs.tag }}
-          toTag: ${{ github.sha }}
-          configurationJson: |
-            {
-              "template": "#{{CHANGELOG}}",
-              "commit_template": "- #{{BODY}} - #{{AUTHOR}}",
-              "categories": [
-                {
-                  "title": "### Feature",
-                  "labels": ["feat", "feature"],
-                },
-                {
-                  "title": "### Fix",
-                  "labels": ["fix", "bug"],
-                },
-                {
-                  "title": "### Other",
-                  "labels": [],
-                },
-              ],
-              "label_extractor": [
-                {
-                  "pattern": "^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test){1}(\\$[\\w\\-\\.]+\\$)?(!)?: ([\\w ])+([\\s\\S]*)",
-                  "on_property": "title",
-                  "target": "$1"
-                }
-              ]
-            }
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Generate CHANGELOG file
-        run: |
-          # Prepend version header and latest changelog to CHANGELOG.md
-          echo -e "## ${{ env.VERSION }} - $(date +'%Y-%m-%d')\n${{ steps.build_changelog.outputs.changelog }}" | cat - CHANGELOG.md > CHANGELOG.tmp
-          mv CHANGELOG.tmp CHANGELOG.md
-          # 提交 CHANGELOG.md 文件
-          git config --local user.name "github-actions"
-          git config --local user.email "github-actions@github.com"
-          git add CHANGELOG.md
-          git commit -m "Update CHANGELOG.md"
-          git push
-          
-
       - name: Compile TypeScript
+        if: steps.version-check.outputs.version-changed == 'true'
         run: pnpm run compile
 
       - name: Package extension
+        if: steps.version-check.outputs.version-changed == 'true'
         run: pnpm run build:package
 
       - name: Upload release asset
+        if: steps.version-check.outputs.version-changed == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.repository.name }}-${{ env.VERSION }}.vsix
+          name: ${{ github.event.repository.name }}-${{ steps.version-check.outputs.new-version }}.vsix
           path: ./*.vsix
 
       - name: Create Release
+        if: steps.version-check.outputs.version-changed == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.VERSION }} # 使用版本号作为 tag
+          tag_name: v${{ steps.version-check.outputs.new-version }}
+          name: Release v${{ steps.version-check.outputs.new-version }}
+          body_path: release-changelog.txt
           files: ./*.vsix
-          body: ${{ steps.build_changelog.outputs.changelog }} # 使用生成的 Changelog
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
