@@ -26,11 +26,21 @@ function analyzeJavaScriptSelection(
 			variableName: 'debug'
 		};
 	}
-
-	// 检测是否包含错误关键词
-	const containsErrorKeyword = errorKeywords.some(keyword => 
-		trimmedText.toLowerCase().includes(keyword.toLowerCase())
-	);
+	// 检测是否包含错误关键词 - 使用更精确的匹配
+	const containsErrorKeyword = errorKeywords.some(keyword => {
+		const lowerText = trimmedText.toLowerCase();
+		const lowerKeyword = keyword.toLowerCase();
+		
+		// 对于单字符关键词（如 'e'），只匹配完整的变量名
+		if (keyword.length === 1) {
+			return lowerText === lowerKeyword;
+		}
+		
+		// 对于多字符关键词，可以是子字符串匹配，但要确保是完整的单词
+		// 使用单词边界匹配，避免部分匹配
+		const wordBoundaryRegex = new RegExp(`\\b${lowerKeyword}\\b`, 'i');
+		return wordBoundaryRegex.test(lowerText);
+	});
 
 	// 检测表达式类型
 	const isFunction = /\w+\s*\(.*\)/.test(trimmedText);
