@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       pr_number:
-        description: 'PR number to update changelog for'
+        description: "PR number to update changelog for"
         required: true
         type: number
   issue_comment:
@@ -20,7 +20,7 @@ jobs:
     outputs:
       should-run: ${{ steps.check.outputs.should-run }}
       pr-number: ${{ steps.check.outputs.pr-number }}
-    
+
     steps:
       - name: Check comment trigger
         id: check
@@ -29,14 +29,14 @@ jobs:
           script: |
             const comment = context.payload.comment;
             const issue = context.payload.issue;
-            
+
             // 检查是否是 PR 的评论
             if (!issue.pull_request) {
               console.log('Comment is not on a PR');
               core.setOutput('should-run', 'false');
               return;
             }
-            
+
             // 检查评论内容是否包含触发指令
             const commentBody = comment.body.toLowerCase().trim();
             const triggerCommands = [
@@ -46,11 +46,11 @@ jobs:
               '/update changelog',
               '/更新changelog'
             ];
-            
+
             const shouldRun = triggerCommands.some(cmd => 
               commentBody.includes(cmd) || commentBody.startsWith(cmd)
             );
-            
+
             if (shouldRun) {
               console.log('Trigger command found in comment');
               core.setOutput('should-run', 'true');
@@ -76,7 +76,7 @@ jobs:
         github.event_name == 'workflow_dispatch' || 
         (github.event_name == 'issue_comment' && needs.check-comment.outputs.should-run == 'true')
       )
-    needs: 
+    needs:
       - check-comment
     outputs:
       version-changed: ${{ steps.version-check.outputs.version-changed }}
@@ -185,36 +185,32 @@ jobs:
               console.log('Extracted changelog from ## section:', changelog);
             }
 
-            if (!changelog && cleanedPrBody.trim()) {
-              const changelogKeywords = ['Feature', 'Fixed', 'Changed', 'Added', 'Removed', 'feat', 'fix', 'add', 'update', 'remove', '新增', '修复', '更新', '删除', '功能', '变更'];
-              const hasChangelogKeywords = changelogKeywords.some(keyword => 
-                cleanedPrBody.toLowerCase().includes(keyword.toLowerCase())
-              );
-
-              if (hasChangelogKeywords) {
-                const featureMatch = cleanedPrBody.match(/###\s*(?:Feature|Added|Fixed|Changed|Removed|新增|修复|更新|变更|功能)[\s\S]*$/i);
-                if (featureMatch) {
-                  changelog = featureMatch[0].trim();
-                  console.log('Extracted changelog from ### section:', changelog);
-                }
-              }
-            }
+            // 只从明确的 ## Changelog 部分提取内容，不进行宽泛的关键词匹配
+            // 这样可以避免意外提取模板、示例或无关内容
 
             // 如果提取的 changelog 为空或只包含空白字符，则跳过
             if (!changelog || changelog.trim() === '') {
               console.log('No valid changelog content found, using fallback');
             }
 
-            // 检查提取的内容是否只是注释模板
+            // 检查提取的内容是否只是注释模板或示例内容
             if (changelog && changelog.trim() !== '') {
-              // 检查是否包含模板关键词，如果是模板则跳过
+              // 扩展模板和示例内容检测关键词
               const templateKeywords = [
                 'If this PR requires a new version',
                 '如果这个 PR 需要发布新版本',
                 'please write the changelog below',
                 '请在下面写明更新日志',
                 'Suggested format',
-                '格式建议'
+                '格式建议',
+                'Example / 示例',
+                'batch file copy functionality',
+                'Added keyboard shortcut',
+                'Fixed performance issues',
+                'lower the minimum supported version',
+                'CHANGELOG generation',
+                'templates for changelog entries',
+                'enhance log statement insertion'
               ];
               
               const isTemplate = templateKeywords.some(keyword => 
@@ -222,7 +218,7 @@ jobs:
               );
               
               if (isTemplate) {
-                console.log('Detected template content, treating as empty');
+                console.log('Detected template or example content, treating as empty');
                 changelog = '';
               }
             }
@@ -545,10 +541,10 @@ jobs:
         github.event_name == 'pull_request' || 
         (github.event_name == 'issue_comment' && needs.check-comment.outputs.should-run == 'true')
       )
-    needs: 
+    needs:
       - check-comment
       - update-changelog
-    
+
     steps:
       - name: Report changelog update status
         uses: actions/github-script@v7
@@ -563,15 +559,15 @@ jobs:
             const changelogUpdated = process.env.CHANGELOG_UPDATED === 'true';
             const updateJobResult = process.env.UPDATE_JOB_RESULT;
             const prNumber = process.env.PR_NUMBER;
-            
+
             console.log('Changelog update summary:');
             console.log('- Version changed:', versionChanged);
             console.log('- Changelog updated:', changelogUpdated);
             console.log('- Update job result:', updateJobResult);
-            
+
             let status = 'success';
             let description = 'Changelog workflow completed';
-            
+
             if (versionChanged) {
               if (updateJobResult === 'success' && changelogUpdated) {
                 status = 'success';
@@ -589,7 +585,7 @@ jobs:
                 description = 'Changelog workflow encountered errors';
               }
             }
-            
+
             // 获取 PR 的 commit SHA
             if (prNumber && github.event_name === 'pull_request') {
               const prRef = context.payload.pull_request.head.sha;
@@ -606,7 +602,7 @@ jobs:
               
               console.log(`Set commit status: ${status} - ${description}`);
             }
-            
+
             // 如果是关键性失败，让 job 失败
             if (versionChanged && (updateJobResult !== 'success' || !changelogUpdated)) {
               core.setFailed('Version was changed but changelog was not properly updated. This will block PR merging.');

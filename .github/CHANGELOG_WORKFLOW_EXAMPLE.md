@@ -1,5 +1,9 @@
 # Changelog Workflow Usage Example / 更新日志工作流程使用示例
 
+> ⚠️ **IMPORTANT / 重要提示**: This is an EXAMPLE document only. The content below is for demonstration purposes and should NOT be used in actual PRs.
+>
+> ⚠️ **重要**: 这仅是一个示例文档。以下内容仅用于演示，不应在实际的 PR 中使用。
+
 ## Example Scenario: Adding New Feature and Releasing Version 0.0.4
 
 ## 示例场景：添加新功能并发布版本 0.0.4
@@ -39,6 +43,10 @@ git push origin feature/batch-copy
 
 Create a PR on GitHub with the following description:
 在 GitHub 上创建 PR，使用以下描述：
+
+> ⚠️ **EXAMPLE ONLY / 仅为示例**: The content below is for demonstration. Do NOT copy this to real PRs.
+>
+> ⚠️ **仅为示例**: 以下内容仅用于演示，请勿复制到真实的 PR 中。
 
 ```markdown
 ## Description / 描述

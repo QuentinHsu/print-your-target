@@ -78,7 +78,7 @@ jobs:
               echo "Warning: No changelog entry found for version $NEW_VERSION in CHANGELOG.md"
               echo "Extracting changelog from PR description"
               
-              # 从 PR 描述中提取 changelog 内容
+              # 从 PR 描述中提取 changelog 内容，使用与 PR workflow 相同的逻辑
               PR_BODY="${{ github.event.pull_request.body }}"
               
               # 如果 PR 描述为空，使用默认内容
@@ -90,8 +90,35 @@ jobs:
           - 发布 v${NEW_VERSION} 版本
           EOF
               else
-                echo "Using PR description as changelog content"
-                echo "$PR_BODY" > release-changelog.txt
+                echo "Extracting changelog from PR description using safer logic"
+                
+                # 移除 HTML 注释
+                PR_BODY_CLEAN=$(echo "$PR_BODY" | sed '/<!--/,/-->/d')
+                
+                # 尝试提取 ## Changelog 部分
+                CHANGELOG_SECTION=$(echo "$PR_BODY_CLEAN" | sed -n '/^## *[Cc]hangelog/,/^## /p' | sed '$d' | tail -n +2)
+                
+                if [ -n "$CHANGELOG_SECTION" ] && [ "$CHANGELOG_SECTION" != "" ]; then
+                  # 检查是否包含模板内容
+                  if echo "$CHANGELOG_SECTION" | grep -qi -E "(format.*建议|example.*示例|batch.*copy|keyboard.*shortcut|minimum.*supported|CHANGELOG.*generation)"; then
+                    echo "Detected template/example content in PR, using default changelog"
+                    cat > release-changelog.txt << EOF
+          ### Changed / 变更
+          - Release v${NEW_VERSION}
+          - 发布 v${NEW_VERSION} 版本
+          EOF
+                  else
+                    echo "Using extracted changelog section from PR"
+                    echo "$CHANGELOG_SECTION" > release-changelog.txt
+                  fi
+                else
+                  echo "No valid changelog section found in PR, using default"
+                  cat > release-changelog.txt << EOF
+          ### Changed / 变更
+          - Release v${NEW_VERSION}
+          - 发布 v${NEW_VERSION} 版本
+          EOF
+                fi
               fi
             fi
             
@@ -100,7 +127,7 @@ jobs:
           else
             echo "CHANGELOG.md not found, extracting changelog from PR description"
             
-            # 从 PR 描述中提取 changelog 内容
+            # 从 PR 描述中提取 changelog 内容，使用相同的安全逻辑
             PR_BODY="${{ github.event.pull_request.body }}"
             
             # 如果 PR 描述为空，使用默认内容
@@ -112,8 +139,35 @@ jobs:
           - 发布 v${NEW_VERSION} 版本
           EOF
             else
-              echo "Using PR description as changelog content"
-              echo "$PR_BODY" > release-changelog.txt
+              echo "Extracting changelog from PR description using safer logic"
+              
+              # 移除 HTML 注释
+              PR_BODY_CLEAN=$(echo "$PR_BODY" | sed '/<!--/,/-->/d')
+              
+              # 尝试提取 ## Changelog 部分
+              CHANGELOG_SECTION=$(echo "$PR_BODY_CLEAN" | sed -n '/^## *[Cc]hangelog/,/^## /p' | sed '$d' | tail -n +2)
+              
+              if [ -n "$CHANGELOG_SECTION" ] && [ "$CHANGELOG_SECTION" != "" ]; then
+                # 检查是否包含模板内容
+                if echo "$CHANGELOG_SECTION" | grep -qi -E "(format.*建议|example.*示例|batch.*copy|keyboard.*shortcut|minimum.*supported|CHANGELOG.*generation)"; then
+                  echo "Detected template/example content in PR, using default changelog"
+                  cat > release-changelog.txt << EOF
+          ### Changed / 变更
+          - Release v${NEW_VERSION}
+          - 发布 v${NEW_VERSION} 版本
+          EOF
+                else
+                  echo "Using extracted changelog section from PR"
+                  echo "$CHANGELOG_SECTION" > release-changelog.txt
+                fi
+              else
+                echo "No valid changelog section found in PR, using default"
+                cat > release-changelog.txt << EOF
+          ### Changed / 变更
+          - Release v${NEW_VERSION}
+          - 发布 v${NEW_VERSION} 版本
+          EOF
+              fi
             fi
           fi
 
