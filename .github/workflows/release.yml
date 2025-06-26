@@ -14,28 +14,47 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const { data: collaborators } = await github.rest.repos.listCollaborators({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-            });
-
             const commenter = context.payload.comment.user.login;
-            const hasWriteAccess = collaborators.some(collaborator => 
-              collaborator.login === commenter && 
-              ['admin', 'write'].includes(collaborator.permissions.permission)
-            );
 
-            if (!hasWriteAccess) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: `❌ **Permission denied**: @${commenter} does not have write permission to trigger releases.`
-              });
-              throw new Error('User does not have write permission');
+            // 检查是否是仓库所有者
+            if (commenter === context.repo.owner) {
+              console.log(`✅ User ${commenter} is the repository owner`);
+              return;
             }
 
-            console.log(`✅ User ${commenter} has write permission`);
+            // 检查协作者权限
+            try {
+              const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: commenter
+              });
+              
+              const hasWriteAccess = ['admin', 'write', 'maintain'].includes(permission.permission);
+              
+              if (!hasWriteAccess) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: `❌ **Permission denied**: @${commenter} does not have write permission to trigger releases. Current permission: ${permission.permission}`
+                });
+                throw new Error(`User does not have write permission. Current permission: ${permission.permission}`);
+              }
+              
+              console.log(`✅ User ${commenter} has ${permission.permission} permission`);
+            } catch (error) {
+              if (error.status === 404) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: `❌ **Permission denied**: @${commenter} is not a collaborator of this repository.`
+                });
+                throw new Error('User is not a collaborator');
+              }
+              throw error;
+            }
 
       - name: Get PR details
         id: pr-details
