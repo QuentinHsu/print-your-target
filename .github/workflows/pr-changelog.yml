@@ -284,10 +284,31 @@ jobs:
                 rm -f CHANGELOG.md.tmp
               fi
               
-              # 添加新的条目
-              head -n 3 CHANGELOG.md > temp_changelog.md 2>/dev/null || echo -e "# Change Log\n\n" > temp_changelog.md
-              cat new_changelog_entry.md >> temp_changelog.md
-              tail -n +4 CHANGELOG.md >> temp_changelog.md 2>/dev/null || true
+              # 智能插入新条目 - 查找第一个版本条目的位置
+              FIRST_VERSION_LINE=$(grep -n "^## \[" CHANGELOG.md | head -1 | cut -d: -f1)
+              if [ -n "$FIRST_VERSION_LINE" ] && [ "$FIRST_VERSION_LINE" -gt 1 ]; then
+                # 在第一个版本条目之前插入
+                head -n $((FIRST_VERSION_LINE - 1)) CHANGELOG.md > temp_changelog.md
+                cat new_changelog_entry.md >> temp_changelog.md
+                tail -n +$FIRST_VERSION_LINE CHANGELOG.md >> temp_changelog.md
+              else
+                # 如果没有找到现有版本或文件为空，查找合适位置插入
+                HEADER_END=$(grep -n "^# " CHANGELOG.md | head -1 | cut -d: -f1)
+                if [ -n "$HEADER_END" ]; then
+                  # 在标题后插入（通常是第1行 + 空行）
+                  head -n $((HEADER_END)) CHANGELOG.md > temp_changelog.md
+                  echo "" >> temp_changelog.md
+                  cat new_changelog_entry.md >> temp_changelog.md
+                  if [ $(wc -l < CHANGELOG.md) -gt $HEADER_END ]; then
+                    tail -n +$((HEADER_END + 1)) CHANGELOG.md >> temp_changelog.md
+                  fi
+                else
+                  # 如果连标题都没有，创建完整结构
+                  echo -e "# Change Log\n" > temp_changelog.md
+                  cat new_changelog_entry.md >> temp_changelog.md
+                  cat CHANGELOG.md >> temp_changelog.md 2>/dev/null || true
+                fi
+              fi
               mv temp_changelog.md CHANGELOG.md
             else
               echo "Using main branch CHANGELOG.md as-is (no regeneration requested)"
@@ -295,10 +316,31 @@ jobs:
             fi
           else
             echo "Adding new entry for version $NEW_VERSION to main branch changelog"
-            # 使用 main 分支的 changelog 作为基础，添加新版本条目
-            head -n 3 main_changelog.md > temp_changelog.md 2>/dev/null || echo -e "# Change Log\n\n" > temp_changelog.md
-            cat new_changelog_entry.md >> temp_changelog.md
-            tail -n +4 main_changelog.md >> temp_changelog.md 2>/dev/null || true
+            # 智能插入到 main 分支 changelog 中
+            FIRST_VERSION_LINE=$(grep -n "^## \[" main_changelog.md | head -1 | cut -d: -f1)
+            if [ -n "$FIRST_VERSION_LINE" ] && [ "$FIRST_VERSION_LINE" -gt 1 ]; then
+              # 在第一个版本条目之前插入
+              head -n $((FIRST_VERSION_LINE - 1)) main_changelog.md > temp_changelog.md
+              cat new_changelog_entry.md >> temp_changelog.md
+              tail -n +$FIRST_VERSION_LINE main_changelog.md >> temp_changelog.md
+            else
+              # 如果没有找到现有版本，查找标题后的位置
+              HEADER_END=$(grep -n "^# " main_changelog.md | head -1 | cut -d: -f1)
+              if [ -n "$HEADER_END" ]; then
+                # 在标题后插入
+                head -n $((HEADER_END)) main_changelog.md > temp_changelog.md
+                echo "" >> temp_changelog.md
+                cat new_changelog_entry.md >> temp_changelog.md
+                if [ $(wc -l < main_changelog.md) -gt $HEADER_END ]; then
+                  tail -n +$((HEADER_END + 1)) main_changelog.md >> temp_changelog.md
+                fi
+              else
+                # 创建新的 CHANGELOG 结构
+                echo -e "# Change Log\n" > temp_changelog.md
+                cat new_changelog_entry.md >> temp_changelog.md
+                cat main_changelog.md >> temp_changelog.md 2>/dev/null || true
+              fi
+            fi
             mv temp_changelog.md CHANGELOG.md
           fi
 

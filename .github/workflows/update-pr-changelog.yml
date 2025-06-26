@@ -228,16 +228,36 @@ jobs:
               echo "Version $NEW_VERSION already exists in CHANGELOG.md, skipping update to avoid duplication"
             else
               echo "Adding new entry for version $NEW_VERSION to CHANGELOG.md"
-              # 在第4行（标题和空行后）追加新内容，保持现有格式
-              head -n 3 CHANGELOG.md > temp_changelog.md
-              cat new_changelog_entry.md >> temp_changelog.md
-              tail -n +4 CHANGELOG.md >> temp_changelog.md
+              # 智能插入 - 查找第一个版本条目的位置
+              FIRST_VERSION_LINE=$(grep -n "^## \[" CHANGELOG.md | head -1 | cut -d: -f1)
+              if [ -n "$FIRST_VERSION_LINE" ] && [ "$FIRST_VERSION_LINE" -gt 1 ]; then
+                # 在第一个版本条目之前插入
+                head -n $((FIRST_VERSION_LINE - 1)) CHANGELOG.md > temp_changelog.md
+                cat new_changelog_entry.md >> temp_changelog.md
+                tail -n +$FIRST_VERSION_LINE CHANGELOG.md >> temp_changelog.md
+              else
+                # 如果没有找到现有版本，查找标题后的位置
+                HEADER_END=$(grep -n "^# " CHANGELOG.md | head -1 | cut -d: -f1)
+                if [ -n "$HEADER_END" ]; then
+                  # 在标题后插入
+                  head -n $((HEADER_END)) CHANGELOG.md > temp_changelog.md
+                  echo "" >> temp_changelog.md
+                  cat new_changelog_entry.md >> temp_changelog.md
+                  if [ $(wc -l < CHANGELOG.md) -gt $HEADER_END ]; then
+                    tail -n +$((HEADER_END + 1)) CHANGELOG.md >> temp_changelog.md
+                  fi
+                else
+                  # 如果连标题都没有，创建完整结构
+                  echo -e "# Change Log\n" > temp_changelog.md
+                  cat new_changelog_entry.md >> temp_changelog.md
+                  cat CHANGELOG.md >> temp_changelog.md 2>/dev/null || true
+                fi
+              fi
               mv temp_changelog.md CHANGELOG.md
             fi
           else
             echo "CHANGELOG.md doesn't exist, creating new one"
             echo "# Change Log" > CHANGELOG.md
-            echo "" >> CHANGELOG.md
             echo "" >> CHANGELOG.md
             cat new_changelog_entry.md >> CHANGELOG.md
           fi
