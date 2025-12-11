@@ -1,120 +1,120 @@
 {
-	"name": "print-your-target",
-	"displayName": "Print your target",
-	"description": "Print your target, such as variables, in JavaScript/TypeScript/Go files.",
-	"version": "0.0.5",
-	"author": "QuentinHsu <https://github.com/QuentinHsu>",
-	"publisher": "QuentinHsu",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/QuentinHsu/print-your-target"
-	},
-	"engines": {
-		"vscode": "^1.95.0"
-	},
-	"icon": "assets/icon.png",
-	"categories": [
-		"Other",
-		"Debuggers"
-	],
-	"activationEvents": [
-		"onLanguage:javascript",
-		"onLanguage:typescript",
-		"onLanguage:go"
-	],
-	"main": "./out/extension.js",
-	"contributes": {
-		"commands": [
-			{
-				"command": "print-your-target.addLogStatement",
-				"title": "Add Log Statement"
-			},
-			{
-				"command": "print-your-target.deleteLogStatements",
-				"title": "Delete Log Statements"
-			}
-		],
-		"keybindings": [
-			{
-				"command": "print-your-target.addLogStatement",
-				"key": "ctrl+shift+l",
-				"mac": "cmd+shift+l",
-				"when": "editorTextFocus"
-			},
-			{
-				"command": "print-your-target.deleteLogStatements",
-				"key": "ctrl+shift+d",
-				"mac": "cmd+shift+d",
-				"when": "editorTextFocus"
-			}
-		],
-		"configuration": {
-			"type": "object",
-			"properties": {
-				"printYourTarget.errorKeywords.javascript": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					},
-					"default": [
-						"error",
-						"err",
-						"e"
-					],
-					"description": "Define error keywords for JavaScript family languages."
-				},
-				"printYourTarget.errorKeywords.go": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					},
-					"default": [
-						"err",
-						"error"
-					],
-					"description": "Define error keywords for Go language."
-				},
-				"printYourTarget.deleteLogType.javascript": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					},
-					"default": [
-						"log"
-					],
-					"description": "Define log types for JavaScript family languages."
-				},
-				"printYourTarget.deleteLogType.go": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					},
-					"default": [
-						"Printf"
-					],
-					"description": "Define log types for Go language."
-				}
-			}
-		}
-	},
-	"scripts": {
-		"vscode:prepublish": "pnpm run compile",
-		"compile": "tsc -p ./",
-		"watch": "tsc -watch -p ./",
-		"pretest": "pnpm run compile && pnpm run lint",
-		"lint": "eslint src",
-		"test": "vscode-test",
-		"build:package": "pnpm vsce package --no-dependencies"
-	},
-	"devDependencies": {
-		"@types/vscode": "^1.95.0",
-		"@types/mocha": "^10.0.10",
-		"@types/node": "20.x",
-		"@typescript-eslint/eslint-plugin": "^8.25.0",
-		"@typescript-eslint/parser": "^8.25.0",
-		"eslint": "^9.21.0",
-		"typescript": "^5.7.3",
-		"@vscode/test-cli": "^0.0.10",
-		"@vscode/test-electron": "^2.4.1"
-	}
+  "activationEvents": [
+    "onLanguage:javascript",
+    "onLanguage:typescript",
+    "onLanguage:go"
+  ],
+  "author": "QuentinHsu <https://github.com/QuentinHsu>",
+  "categories": [
+    "Other",
+    "Debuggers"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "print-your-target.addLogStatement",
+        "title": "Add Log Statement"
+      },
+      {
+        "command": "print-your-target.deleteLogStatements",
+        "title": "Delete Log Statements"
+      }
+    ],
+    "configuration": {
+      "properties": {
+        "printYourTarget.deleteLogType.go": {
+          "default": [
+            "Printf"
+          ],
+          "description": "Define log types for Go language.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "printYourTarget.deleteLogType.javascript": {
+          "default": [
+            "log"
+          ],
+          "description": "Define log types for JavaScript family languages.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "printYourTarget.errorKeywords.go": {
+          "default": [
+            "err",
+            "error"
+          ],
+          "description": "Define error keywords for Go language.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "printYourTarget.errorKeywords.javascript": {
+          "default": [
+            "error",
+            "err",
+            "e"
+          ],
+          "description": "Define error keywords for JavaScript family languages.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "keybindings": [
+      {
+        "command": "print-your-target.addLogStatement",
+        "key": "ctrl+shift+l",
+        "mac": "cmd+shift+l",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "print-your-target.deleteLogStatements",
+        "key": "ctrl+shift+d",
+        "mac": "cmd+shift+d",
+        "when": "editorTextFocus"
+      }
+    ]
+  },
+  "description": "Print your target, such as variables, in JavaScript/TypeScript/Go files.",
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.8",
+    "@quentinhsu/biome-config": "^0.3.5",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "24.10.1",
+    "@types/vscode": "1.106.1",
+    "@vscode/test-cli": "0.0.12",
+    "@vscode/test-electron": "2.5.2",
+    "typescript": "5.9.3"
+  },
+  "displayName": "Print your target",
+  "engines": {
+    "vscode": "^1.106.1"
+  },
+  "icon": "assets/icon.png",
+  "main": "./out/extension.js",
+  "name": "print-your-target",
+  "publisher": "QuentinHsu",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/QuentinHsu/print-your-target"
+  },
+  "scripts": {
+    "build": "pnpm build:package",
+    "build:package": "pnpm vsce package --no-dependencies",
+    "compile": "tsc -p ./",
+    "lint": "eslint src",
+    "pretest": "pnpm run compile && pnpm run lint",
+    "test": "vscode-test",
+    "vscode:prepublish": "pnpm run compile",
+    "watch": "tsc -watch -p ./"
+  },
+  "version": "0.0.5"
 }
