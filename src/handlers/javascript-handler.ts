@@ -4,9 +4,22 @@ import { TypeScriptASTAnalyzer } from '../ast-utils';
 import type { InsertionPoint, LanguageHandler, LogAnalysis } from '../types';
 
 export class JavaScriptHandler implements LanguageHandler {
+  private analyzer?: TypeScriptASTAnalyzer;
+
+  constructor(analyzer?: TypeScriptASTAnalyzer) {
+    this.analyzer = analyzer;
+  }
+
+  private getAnalyzer(document: vscode.TextDocument): TypeScriptASTAnalyzer {
+    if (this.analyzer) {
+      return this.analyzer;
+    }
+    return new TypeScriptASTAnalyzer(document);
+  }
+
   analyzeSelection(selectedText: string, document: vscode.TextDocument, selection: vscode.Selection, errorKeywords: string[]): LogAnalysis {
     const trimmedText = selectedText.trim();
-    const analyzer = new TypeScriptASTAnalyzer(document);
+    const analyzer = this.getAnalyzer(document);
 
     // If no selection, try to get word at cursor
     if (!trimmedText) {
@@ -73,7 +86,7 @@ export class JavaScriptHandler implements LanguageHandler {
     });
   }
 
-  private generateLogMessage(text: string, expressionInfo: any): string {
+  private generateLogMessage(text: string, expressionInfo: { isFunction: boolean; isObject: boolean; variableName: string }): string {
     if (expressionInfo.isFunction) {
       const funcMatch = text.match(/(\w+)\s*\(/);
       const funcName = funcMatch ? funcMatch[1] : 'function';
@@ -107,8 +120,8 @@ export class JavaScriptHandler implements LanguageHandler {
     return text.includes('.') || text.includes('(') || text.includes('[') || text.includes('?');
   }
 
-  findInsertionPoint(document: vscode.TextDocument, selection: vscode.Selection, analysis: LogAnalysis): InsertionPoint {
-    const analyzer = new TypeScriptASTAnalyzer(document);
+  findInsertionPoint(document: vscode.TextDocument, selection: vscode.Selection, _analysis: LogAnalysis): InsertionPoint {
+    const analyzer = this.getAnalyzer(document);
     const position = analyzer.findBestInsertionPoint(selection);
 
     // Get indentation from the selection line
@@ -123,7 +136,7 @@ export class JavaScriptHandler implements LanguageHandler {
   }
 
   findLogStatements(document: vscode.TextDocument, logTypes: string[]): vscode.Range[] {
-    const analyzer = new TypeScriptASTAnalyzer(document);
+    const analyzer = this.getAnalyzer(document);
     return analyzer.findLogStatements(logTypes);
   }
 }

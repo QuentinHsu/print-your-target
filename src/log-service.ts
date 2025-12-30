@@ -1,9 +1,29 @@
 import * as vscode from 'vscode';
 
+import { TypeScriptASTAnalyzer } from './ast-utils';
 import { LanguageHandlerFactory } from './language-factory';
-import { LogStatement } from './types';
 
 export class LogService {
+  private analyzerCache = new WeakMap<vscode.TextDocument, TypeScriptASTAnalyzer>();
+
+  private getAnalyzer(document: vscode.TextDocument): TypeScriptASTAnalyzer {
+    let analyzer = this.analyzerCache.get(document);
+    if (!analyzer) {
+      analyzer = new TypeScriptASTAnalyzer(document);
+      this.analyzerCache.set(document, analyzer);
+    }
+    return analyzer;
+  }
+
+  private shouldUseAnalyzer(languageId: string): boolean {
+    const jsLanguages = ['javascript', 'typescript', 'javascriptreact', 'typescriptreact', 'jsx', 'tsx', 'vue', 'svelte', 'astro', 'html'];
+    return jsLanguages.includes(languageId);
+  }
+
+  clearCache(document: vscode.TextDocument): void {
+    this.analyzerCache.delete(document);
+  }
+
   async addLogStatement(): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
@@ -16,8 +36,11 @@ export class LogService {
     const selectedText = document.getText(selection);
     const languageId = document.languageId;
 
+    // Get or create analyzer for JavaScript/TypeScript files
+    const analyzer = this.shouldUseAnalyzer(languageId) ? this.getAnalyzer(document) : undefined;
+
     // Get language handler
-    const handler = LanguageHandlerFactory.createHandler(languageId);
+    const handler = LanguageHandlerFactory.createHandler(languageId, analyzer);
     if (!handler) {
       vscode.window.showInformationMessage(`Unsupported language: ${languageId}`);
       return;
@@ -37,7 +60,7 @@ export class LogService {
       const insertionPoint = handler.findInsertionPoint(document, selection, analysis);
 
       // Create the final statement with proper indentation
-      const finalStatement = insertionPoint.indentation + logStatement + '\n';
+      const finalStatement = `${insertionPoint.indentation}${logStatement}\n`;
 
       // Apply the edit
       const success = await editor.edit(editBuilder => {
@@ -46,26 +69,28 @@ export class LogService {
         // Add required imports if needed (for Go)
         if (handler.addRequiredImports) {
           const importEdits = handler.addRequiredImports(document);
-          importEdits.forEach(edit => {
+          for (const edit of importEdits) {
             if (edit.range.isEmpty) {
               editBuilder.insert(edit.range.start, edit.newText);
             } else {
               editBuilder.replace(edit.range, edit.newText);
             }
-          });
+          }
         }
       });
 
       if (success) {
-        // Position cursor at the end of inserted log statement
-        const newPosition = new vscode.Position(insertionPoint.position.line, finalStatement.length - 1);
-        editor.selection = new vscode.Selection(newPosition, newPosition);
-        editor.revealRange(new vscode.Range(newPosition, newPosition));
+        // Position cursor at the end of the inserted log statement
+        const insertedLine = editor.document.lineAt(insertionPoint.position.line);
+        const endOfLine = insertedLine.range.end;
+        editor.selection = new vscode.Selection(endOfLine, endOfLine);
+        editor.revealRange(new vscode.Range(endOfLine, endOfLine));
       } else {
         vscode.window.showErrorMessage('Failed to insert log statement.');
       }
     } catch (error) {
-      vscode.window.showErrorMessage(`Error adding log statement: ${error}`);
+      const message = error instanceof Error ? error.message : String(error);
+      vscode.window.showErrorMessage(`Error adding log statement: ${message}`);
     }
   }
 
@@ -79,8 +104,11 @@ export class LogService {
     const document = editor.document;
     const languageId = document.languageId;
 
+    // Get or create analyzer for JavaScript/TypeScript files
+    const analyzer = this.shouldUseAnalyzer(languageId) ? this.getAnalyzer(document) : undefined;
+
     // Get language handler
-    const handler = LanguageHandlerFactory.createHandler(languageId);
+    const handler = LanguageHandlerFactory.createHandler(languageId, analyzer);
     if (!handler) {
       vscode.window.showInformationMessage(`Unsupported language: ${languageId}`);
       return;
@@ -104,9 +132,9 @@ export class LogService {
       // Sort ranges in reverse order to avoid position shifts during deletion
       const sortedRanges = logRanges.sort((a, b) => b.start.compareTo(a.start));
 
-      sortedRanges.forEach(range => {
+      for (const range of sortedRanges) {
         workspaceEdit.delete(document.uri, range);
-      });
+      }
 
       // Apply the edit
       const success = await vscode.workspace.applyEdit(workspaceEdit);
@@ -117,7 +145,8 @@ export class LogService {
         vscode.window.showErrorMessage('Failed to delete log statements.');
       }
     } catch (error) {
-      vscode.window.showErrorMessage(`Error deleting log statements: ${error}`);
+      const message = error instanceof Error ? error.message : String(error);
+      vscode.window.showErrorMessage(`Error deleting log statements: ${message}`);
     }
   }
 
@@ -129,7 +158,11 @@ export class LogService {
 
     const document = editor.document;
     const languageId = document.languageId;
-    const handler = LanguageHandlerFactory.createHandler(languageId);
+
+    // Get or create analyzer for JavaScript/TypeScript files
+    const analyzer = this.shouldUseAnalyzer(languageId) ? this.getAnalyzer(document) : undefined;
+
+    const handler = LanguageHandlerFactory.createHandler(languageId, analyzer);
 
     if (!handler) {
       return 0;
@@ -148,9 +181,9 @@ export class LogService {
     const workspaceEdit = new vscode.WorkspaceEdit();
     const sortedRanges = rangesInScope.sort((a, b) => b.start.compareTo(a.start));
 
-    sortedRanges.forEach(logRange => {
+    for (const logRange of sortedRanges) {
       workspaceEdit.delete(document.uri, logRange);
-    });
+    }
 
     const success = await vscode.workspace.applyEdit(workspaceEdit);
     return success ? rangesInScope.length : 0;

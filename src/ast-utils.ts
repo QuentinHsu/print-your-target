@@ -2,12 +2,13 @@ import * as ts from 'typescript';
 import * as vscode from 'vscode';
 
 import type { StatementInfo } from './types';
-import { ASTNode } from './types';
 
 export class TypeScriptASTAnalyzer {
   private sourceFile: ts.SourceFile | null = null;
+  private document: vscode.TextDocument;
 
-  constructor(private document: vscode.TextDocument) {
+  constructor(document: vscode.TextDocument) {
+    this.document = document;
     this.parseDocument();
   }
 
@@ -52,9 +53,9 @@ export class TypeScriptASTAnalyzer {
     if (!startNode) return null;
 
     // Find the containing statement
-    let statement = startNode;
+    let statement: ts.Node | undefined = startNode;
     while (statement && !this.isStatement(statement)) {
-      statement = statement.parent!;
+      statement = statement.parent;
     }
 
     if (!statement) return null;
@@ -160,7 +161,6 @@ export class TypeScriptASTAnalyzer {
             }
 
             const startPos = this.document.positionAt(statement.getStart());
-            const endPos = this.document.positionAt(statement.getEnd());
 
             // Include the entire line for clean deletion
             const line = this.document.lineAt(startPos.line);

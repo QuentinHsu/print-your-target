@@ -2,7 +2,7 @@
 
 `Print your target` is a Visual Studio Code extension for quickly adding and removing log statements in JavaScript, TypeScript, and Go files. Now powered by **AST analysis** for intelligent and precise code insertion.
 
-## ✨ New in v0.1.0 - AST-Powered Intelligence
+## ✨ New in v0.1.1 - Performance Optimizations
 
 ### 🚀 Major Improvements
 - **AST-Based Analysis**: Uses TypeScript compiler API for accurate code understanding

@@ -24,7 +24,10 @@
       "properties": {
         "printYourTarget.deleteLogType.go": {
           "default": [
-            "Printf"
+            "Printf",
+            "Println",
+            "Fatalf",
+            "Panicf"
           ],
           "description": "Define log types for Go language.",
           "items": {
@@ -34,7 +37,15 @@
         },
         "printYourTarget.deleteLogType.javascript": {
           "default": [
-            "log"
+            "log",
+            "error",
+            "warn",
+            "info",
+            "debug",
+            "trace",
+            "table",
+            "group",
+            "groupEnd"
           ],
           "description": "Define log types for JavaScript family languages.",
           "items": {

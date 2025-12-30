@@ -1,9 +1,10 @@
-import * as assert from 'assert';
+import * as assert from 'node:assert';
 import { suite, test } from 'mocha';
 import * as vscode from 'vscode';
-import { LanguageHandlerFactory } from '../language-factory';
-import { JavaScriptHandler } from '../handlers/javascript-handler';
+
 import { GoHandler } from '../handlers/go-handler';
+import { JavaScriptHandler } from '../handlers/javascript-handler';
+import { LanguageHandlerFactory } from '../language-factory';
 
 suite('Extension Test Suite', () => {
   vscode.window.showInformationMessage('Start all tests.');
@@ -32,21 +33,21 @@ suite('Extension Test Suite', () => {
     test('should analyze simple variable selection', () => {
       const handler = new JavaScriptHandler();
       const mockDocument = {
+        fileName: 'test.js',
         getText: () => 'user',
         getWordRangeAtPosition: () => null,
         lineAt: () => ({ text: '  const user = "test";' }),
-        positionAt: () => new vscode.Position(0, 0),
         offsetAt: () => 0,
-        fileName: 'test.js'
+        positionAt: () => new vscode.Position(0, 0),
       } as any;
-      
+
       const mockSelection = {
+        end: new vscode.Position(0, 10),
         start: new vscode.Position(0, 6),
-        end: new vscode.Position(0, 10)
       } as any;
 
       const analysis = handler.analyzeSelection('user', mockDocument, mockSelection, ['error']);
-      
+
       assert.strictEqual(analysis.selectedText, 'user');
       assert.strictEqual(analysis.variableName, 'user');
       assert.strictEqual(analysis.logMethod, 'log');
@@ -55,12 +56,12 @@ suite('Extension Test Suite', () => {
     test('should generate appropriate log statements', () => {
       const handler = new JavaScriptHandler();
       const analysis = {
-        logMethod: 'log',
         logMessage: 'user',
+        logMethod: 'log',
+        selectedText: 'user',
         variableName: 'user',
-        selectedText: 'user'
       };
-      
+
       const statement = handler.generateLogStatement(analysis);
       assert.ok(statement.includes('console.log'));
       assert.ok(statement.includes('user'));
@@ -71,12 +72,12 @@ suite('Extension Test Suite', () => {
     test('should generate Go log statements', () => {
       const handler = new GoHandler();
       const analysis = {
-        logMethod: 'Printf',
         logMessage: 'user',
+        logMethod: 'Printf',
+        selectedText: 'user',
         variableName: 'user',
-        selectedText: 'user'
       };
-      
+
       const statement = handler.generateLogStatement(analysis);
       assert.ok(statement.includes('log.Printf'));
       assert.ok(statement.includes('%+v'));

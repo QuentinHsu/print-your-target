@@ -57,7 +57,7 @@ export class GoHandler implements LanguageHandler {
     return `log.Printf("%s: %+v\\n", "${logMessage}", ${selectedText})`;
   }
 
-  findInsertionPoint(document: vscode.TextDocument, selection: vscode.Selection, analysis: LogAnalysis): InsertionPoint {
+  findInsertionPoint(document: vscode.TextDocument, selection: vscode.Selection, _analysis: LogAnalysis): InsertionPoint {
     // Simple insertion logic for Go - can be enhanced with Go AST parsing
     const currentLine = document.lineAt(selection.end.line);
     const indentMatch = currentLine.text.match(/^\s*/);
@@ -88,11 +88,12 @@ export class GoHandler implements LanguageHandler {
     // Create regex pattern for Go log statements
     const logPattern = new RegExp(`^\\s*log\\.(${logTypes.join('|')})\\s*\\([^)]*\\)`, 'gm');
 
-    let match;
-    while ((match = logPattern.exec(text)) !== null) {
+    let match = logPattern.exec(text);
+    while (match !== null) {
       const startPos = document.positionAt(match.index);
       const line = document.lineAt(startPos.line);
       ranges.push(line.rangeIncludingLineBreak);
+      match = logPattern.exec(text);
     }
 
     return ranges;

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 
+import type { TypeScriptASTAnalyzer } from './ast-utils';
 import { GoHandler } from './handlers/go-handler';
 import { JavaScriptHandler } from './handlers/javascript-handler';
 import type { LanguageHandler } from './types';
@@ -17,12 +18,12 @@ export class LanguageHandlerFactory {
     vue: 'javascript',
   };
 
-  static createHandler(languageId: string): LanguageHandler | null {
+  static createHandler(languageId: string, analyzer?: TypeScriptASTAnalyzer): LanguageHandler | null {
     const category = LanguageHandlerFactory.LANGUAGE_MAP[languageId];
 
     switch (category) {
       case 'javascript':
-        return new JavaScriptHandler();
+        return new JavaScriptHandler(analyzer);
       case 'go':
         return new GoHandler();
       default:
