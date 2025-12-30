@@ -1,19 +1,32 @@
 # Print your target
 
-`Print your target` 是一个 Visual Studio Code 扩展，用于在 JavaScript、TypeScript 和 Go 文件中快速添加或删除日志语句，帮助开发者更高效地调试代码。
+`Print your target` is a Visual Studio Code extension for quickly adding and removing log statements in JavaScript, TypeScript, and Go files. Now powered by **AST analysis** for intelligent and precise code insertion.
 
-## 功能
+## ✨ New in v0.1.0 - AST-Powered Intelligence
 
-### 添加日志语句
-- 在选中的变量或文本后插入日志语句。
-- 根据文件类型自动生成适合的日志语句：
-  - JavaScript/TypeScript: 使用 `console.log` 或 `console.error`。
-  - Go: 使用 `log.Printf`。
+### 🚀 Major Improvements
+- **AST-Based Analysis**: Uses TypeScript compiler API for accurate code understanding
+- **Smart Expression Detection**: Intelligently identifies variables, functions, objects, and complex expressions  
+- **Context-Aware Insertion**: Finds optimal insertion points based on code structure
+- **Robust Log Removal**: Precisely locates and removes log statements without false positives
 
-### 删除日志语句
-- 根据配置删除指定类型的日志语句：
-  - JavaScript/TypeScript: 支持删除 `console.log`、`console.error` 等。
-  - Go: 支持删除 `log.Printf`。
+## 功能 Features
+
+### 添加日志语句 Add Log Statements
+- **智能分析**: AST-powered analysis understands your code context
+- **自适应日志类型**: Automatically selects appropriate console methods:
+  - `console.error()` for error-related variables
+  - `console.info()` for async operations  
+  - `console.debug()` for function calls
+  - `console.warn()` for conditional expressions
+  - `console.log()` for general variables
+- **精确插入**: Inserts at syntactically correct locations
+- **复杂表达式支持**: Handles complex expressions with object destructuring format
+
+### 删除日志语句 Remove Log Statements  
+- **AST精确匹配**: Uses AST analysis to find exact log statements
+- **批量删除**: Removes multiple log statements efficiently
+- **无误删**: Avoids removing non-log code that might match patterns
 
 ## 快捷键
 
@@ -41,13 +54,31 @@
 1. 从 [Print your target - Visual Studio Marketplace](https://marketplace.visualstudio.com/items/?itemName=QuentinHsu.print-your-target) 安装扩展。
 2. 或者下载 `.vsix` 文件并通过 VS Code 的扩展管理器手动安装。
 
-## 使用方法
+## 使用方法 Usage
 
-1. 打开一个 JavaScript、TypeScript 或 Go 文件。
-2. 选中需要打印的变量或文本。
-3. 使用快捷键或命令面板运行以下命令：
-   - `Add Log Statement`: 添加日志语句。
-   - `Delete Log Statements`: 删除日志语句。
+### Basic Usage
+1. 打开一个 JavaScript、TypeScript 或 Go 文件
+2. 选中需要打印的变量或表达式 (或将光标放在变量上)
+3. 使用快捷键或命令面板运行命令
+
+### Smart Examples
+
+```javascript
+// Select 'user.name' -> Generates:
+console.log('user.name value:', user.name);
+
+// Select 'calculateScore(data)' -> Generates:  
+console.debug('calculateScore() result:', calculateScore(data));
+
+// Select 'await response.json()' -> Generates:
+console.info('response.json() result:', await response.json());
+
+// Select 'error' (error keyword) -> Generates:
+console.error('error:', error);
+
+// Complex expression -> Generates:
+console.log('users.filter() result:', { users: users.filter(u => u.isActive) });
+```
 
 ## 开发与构建
 

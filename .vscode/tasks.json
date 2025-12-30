@@ -3,6 +3,9 @@
 {
   "tasks": [
     {
+      "label": "watch",
+      "type": "shell",
+      "command": "pnpm run watch",
       "group": {
         "isDefault": true,
         "kind": "build"
@@ -11,9 +14,7 @@
       "presentation": {
         "reveal": "never"
       },
-      "problemMatcher": "$tsc-watch",
-      "script": "watch",
-      "type": "npm"
+      "problemMatcher": "$tsc-watch"
     }
   ],
   "version": "2.0.0"

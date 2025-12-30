@@ -1,259 +1,81 @@
-name: Release
+name: Build and Publish
 
 on:
-  issue_comment:
-    types: [created]
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  id-token: write # Required for OIDC
+  contents: write
 
 jobs:
-  release:
-    if: github.event.issue.pull_request && github.event.comment.body == '/release'
+  build:
+    name: Build Extension
     runs-on: ubuntu-latest
-
     steps:
-      - name: Check if commenter has write permission
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const commenter = context.payload.comment.user.login;
-
-            // 检查是否是仓库所有者
-            if (commenter === context.repo.owner) {
-              console.log(`✅ User ${commenter} is the repository owner`);
-              return;
-            }
-
-            // 检查协作者权限
-            try {
-              const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                username: commenter
-              });
-              
-              const hasWriteAccess = ['admin', 'write', 'maintain'].includes(permission.permission);
-              
-              if (!hasWriteAccess) {
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.issue.number,
-                  body: `❌ **Permission denied**: @${commenter} does not have write permission to trigger releases. Current permission: ${permission.permission}`
-                });
-                throw new Error(`User does not have write permission. Current permission: ${permission.permission}`);
-              }
-              
-              console.log(`✅ User ${commenter} has ${permission.permission} permission`);
-            } catch (error) {
-              if (error.status === 404) {
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.issue.number,
-                  body: `❌ **Permission denied**: @${commenter} is not a collaborator of this repository.`
-                });
-                throw new Error('User is not a collaborator');
-              }
-              throw error;
-            }
-
-      - name: Get PR details
-        id: pr-details
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const prNumber = context.issue.number;
-            const { data: pr } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: prNumber,
-            });
-
-            // Check if PR is merged
-            if (!pr.merged) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: `❌ **Cannot release**: This PR is not merged yet. Please merge the PR first before triggering a release.`
-              });
-              throw new Error('PR is not merged');
-            }
-
-            return {
-              merged: pr.merged,
-              merge_commit_sha: pr.merge_commit_sha,
-              head_sha: pr.head.sha,
-              base_ref: pr.base.ref
-            };
-
-      - name: Checkout merged code
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ fromJson(steps.pr-details.outputs.result).merge_commit_sha }}
+          fetch-depth: 0
 
-      - name: Get version from package.json
-        id: get-version
-        run: |
-          VERSION=$(jq -r .version package.json)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Current version: $VERSION"
-
-      - name: Extract changelog from comment
-        id: extract-changelog
-        uses: actions/github-script@v7
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
         with:
-          script: |
-            // 获取所有评论
-            const comments = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
+          version: 10.13.1
 
-            // 查找最新的 changelog 模板评论
-            const changelogComments = comments.data.filter(comment => 
-              comment.body.includes('## Changelog') &&
-              (comment.body.includes('Please edit this comment') || 
-               comment.body.includes('add your') ||
-               !comment.body.includes('Please edit this comment'))  // 包括已编辑的
-            ).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
-
-            if (changelogComments.length === 0) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: `❌ **No changelog found**: Please create a changelog comment first using the template provided when the version was changed.`
-              });
-              throw new Error('No changelog comment found');
-            }
-
-            const latestChangelogComment = changelogComments[0];
-            let changelog = latestChangelogComment.body;
-
-            // 移除 "Please edit this comment" 说明文字
-            changelog = changelog.replace(/\*\*Please edit this comment[^*]*\*\*\s*/g, '');
-
-            // 检查是否还是模板内容（包含提示文字）
-            const isStillTemplate = changelog.includes('(add your') || 
-                                   changelog.includes('add your new features here') ||
-                                   changelog.includes('add your bug fixes here');
-
-            if (isStillTemplate) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: `❌ **Changelog not ready**: The changelog comment still contains template placeholders. Please edit the changelog comment to add real changelog content before triggering the release.`
-              });
-              throw new Error('Changelog is still template');
-            }
-
-            console.log('Extracted changelog:', changelog);
-
-            // 写入文件供后续步骤使用
-            const fs = require('fs');
-            fs.writeFileSync('temp-release-changelog.md', changelog.trim());
-
-            return { changelog: changelog.trim() };
-
-      - name: Set up Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "18"
-
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Install pnpm
-        run: corepack prepare pnpm@latest --activate
-
-      - name: Install vsce
-        run: npm add -g vsce
+          node-version-file: .node-version
 
       - name: Install dependencies
         run: pnpm install
 
-      - name: Compile TypeScript
-        run: pnpm run compile
+      - name: Build extension
+        run: pnpm run build
 
       - name: Package extension
-        run: pnpm run build:package
+        run: pnpm dlx @vscode/vsce package
 
-      - name: Upload release asset
+      - name: Upload VSIX artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.repository.name }}-${{ steps.get-version.outputs.version }}.vsix
-          path: ./*.vsix
+          name: vsix
+          path: "*.vsix"
+          retention-days: 1
 
-      - name: Create GitHub Release
-        id: create-release
-        uses: actions/github-script@v7
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
-          script: |
-            const version = '${{ steps.get-version.outputs.version }}';
-            const tagName = `v${version}`;
+          fetch-depth: 0
 
-            // 读取 changelog
-            const fs = require('fs');
-            const changelog = fs.readFileSync('temp-release-changelog.md', 'utf8');
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
 
-            try {
-              const { data: release } = await github.rest.repos.createRelease({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                tag_name: tagName,
-                name: `Release ${tagName}`,
-                body: changelog,
-                draft: false,
-                prerelease: false,
-                target_commitish: '${{ fromJson(steps.pr-details.outputs.result).merge_commit_sha }}'
-              });
-              
-              console.log(`Created release: ${release.html_url}`);
-              
-              // 上传 .vsix 文件到 release
-              const files = fs.readdirSync('.').filter(f => f.endsWith('.vsix'));
-              if (files.length > 0) {
-                const vsixFile = files[0];
-                const fileData = fs.readFileSync(vsixFile);
-                
-                await github.rest.repos.uploadReleaseAsset({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  release_id: release.id,
-                  name: vsixFile,
-                  data: fileData,
-                });
-                
-                console.log(`Uploaded ${vsixFile} to release`);
-              }
-              
-              // 评论成功信息
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: `🚀 **Release created successfully!**\\n\\n` +
-                      `📦 **Version**: ${tagName}\\n` +
-                      `🔗 **Release URL**: ${release.html_url}\\n\\n` +
-                      `The release has been published with the changelog from the comment above.`
-              });
-              
-              return {
-                release_url: release.html_url,
-                tag_name: tagName
-              };
-              
-            } catch (error) {
-              console.error('Failed to create release:', error);
-              
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: `❌ **Release failed**: ${error.message}\\n\\nPlease check the workflow logs for more details.`
-              });
-              
-              throw error;
-            }
+      - name: Download VSIX artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vsix
+
+      - name: Generate GitHub Changelog
+        run: pnpm dlx changelogithub
+        continue-on-error: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload VSIX to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: "*.vsix"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
