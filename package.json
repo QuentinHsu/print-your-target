@@ -105,7 +105,8 @@
     "@types/node": "24.10.1",
     "@types/vscode": "1.106.1",
     "@vscode/test-cli": "0.0.12",
-    "@vscode/test-electron": "2.5.2"
+    "@vscode/test-electron": "2.5.2",
+    "@vscode/vsce": "^3.7.1"
   },
   "displayName": "Print your target",
   "engines": {
@@ -130,5 +131,5 @@
     "vscode:prepublish": "pnpm run compile",
     "watch": "tsc -watch -p ./"
   },
-  "version": "0.1.1"
+  "version": "0.1.0"
 }
